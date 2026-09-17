@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spinning Cat</title>
+<style>
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: #111;
+  }
+  .cat {
+    font-size: 20vmin;
+    line-height: 1;
+    animation: spin 2s linear infinite;
+  }
+  .cat:hover { animation-duration: .4s; }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+</style>
+</head>
+<body>
+  <div class="cat" role="img" aria-label="spinning cat">🐱</div>
+</body>
+</html>
