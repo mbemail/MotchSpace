@@ -1,29 +1,699 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spinning Cat</title>
+<title>SNAKE</title>
 <style>
-  body {
-    margin: 0;
-    min-height: 100vh;
-    display: grid;
-    place-items: center;
-    background: #111;
-  }
-  .cat {
-    font-size: 20vmin;
-    line-height: 1;
-    animation: spin 2s linear infinite;
-  }
-  .cat:hover { animation-duration: .4s; }
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
+  html,body{background:#000;margin:0;height:100%;display:grid;place-items:center}
+  canvas{width:min(768px,96vw);aspect-ratio:256/240;image-rendering:pixelated}
 </style>
-</head>
-<body>
-  <div class="cat" role="img" aria-label="spinning cat">🐱</div>
-</body>
-</html>
+<canvas id=tv width=256 height=240></canvas>
+<script>
+(() => {
+'use strict'
+// Everything lives in this IIFE. Top-level let/const at global scope collides with
+// non-configurable window properties (top, frames, length) and kills the whole script.
+
+// ============================================================ 2C02 PPU
+// 64-entry master palette. Every colour on screen is an index into this.
+const MASTER = ('7C7C7C 0000FC 0000BC 4428BC 940084 A80020 A81000 881400 503000 007800 006800 005800 004058 000000 000000 000000 '+
+                'BCBCBC 0078F8 0058F8 6844FC D800CC E40058 F83800 E45C10 AC7C00 00B800 00A800 00A844 008888 000000 000000 000000 '+
+                'F8F8F8 3CBCFC 6888FC 9878F8 F878F8 F85898 F87858 FCA044 F8B800 B8F818 58D854 58F898 00E8D8 787878 000000 000000 '+
+                'FCFCFC A4E4FC B8B8F8 D8B8F8 F8B8F8 F8A4C0 F0D0B0 FCE0A8 F8D878 D8F878 B8F8B8 B8F8D8 00FCFC F8D8F8 000000 000000').split(' ')
+const RGB = MASTER.map(h => { const n = parseInt(h,16)
+  return (0xff<<24 | (n&255)<<16 | (n>>8&255)<<8 | (n>>16&255)) >>> 0 })
+
+const UNIVERSAL = 0x0F                                  // $3F00, shows through colour 0
+const BGPAL = [                                         // $3F01-$3F0F, four sub-palettes
+  [UNIVERSAL, 0x30, 0x10, 0x00],                        //  0 HUD text and the wall
+  [UNIVERSAL, 0x0A, 0x1A, 0x29],                        //  1 snake and ground, skin overwrites
+  [UNIVERSAL, 0x00, 0x10, 0x30],                        //  2 maze stone
+  [UNIVERSAL, 0x06, 0x16, 0x30]]                        //  3 spare
+const SPRPAL = [                                        // $3F11-$3F1F
+  [UNIVERSAL, 0x0A, 0x29, 0x30],                        //  0 snake head, skin overwrites
+  [UNIVERSAL, 0x2A, 0x16, 0x30],                        //  1 apple: leaf, flesh, gleam
+  [UNIVERSAL, 0x08, 0x28, 0x30],                        //  2 bonus gem
+  [UNIVERSAL, 0x0F, 0x2D, 0x30]]
+
+// Snake skins are palette swaps, the cheapest trick on the console.
+const SKINS = {
+  GREEN: {bg:[UNIVERSAL,0x0A,0x1A,0x29], spr:[UNIVERSAL,0x0A,0x29,0x30]},
+  BLUE:  {bg:[UNIVERSAL,0x02,0x12,0x21], spr:[UNIVERSAL,0x02,0x21,0x30]},
+  GOLD:  {bg:[UNIVERSAL,0x07,0x17,0x28], spr:[UNIVERSAL,0x07,0x28,0x30]},
+  ICE:   {bg:[UNIVERSAL,0x01,0x11,0x31], spr:[UNIVERSAL,0x01,0x31,0x30]}}
+
+// ============================================================ CHR ROM
+// Each tile is 8x8 at 2 bits per pixel: values 0-3 index the sub-palette.
+// Colour 0 is the universal colour on background, transparent on sprites.
+const T = s => s.trim().split('\n').map(r => r.trim())
+const edge = (t, sides, c) => t.map((row,y) => [...row].map((px,x) =>   // bevel one or more sides
+  (sides.includes('T') && y===0) || (sides.includes('B') && y===7) ||
+  (sides.includes('L') && x===0) || (sides.includes('R') && x===7) ? c : px).join(''))
+const quarters = t16 => [[0,0],[8,0],[0,8],[8,8]].map(([ox,oy]) =>   // 16x16 art into 4 tiles
+  t16.slice(oy, oy+8).map(r => r.slice(ox, ox+8)))
+
+const bgChr = [], bgId = {}, sprChr = [], sprId = {}
+const addBG  = (n,t) => bgId[n]  = bgChr.push(t)-1     // pattern table $0000
+const addSPR = (n,t) => sprId[n] = sprChr.push(t)-1    // pattern table $1000
+
+addBG('BLANK', T(`
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000`))
+
+// Ground: a small motif once per 16x16 block, so the floor has a regular weave
+// instead of noise. Anything busier fights the snake for attention.
+addBG('FIELD', T(`
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000
+  00000000`))
+addBG('FIELD_D', T(`
+  00000000
+  00000000
+  00010000
+  00111000
+  00010000
+  00000000
+  00000000
+  00000000`))
+
+const WALL = T(`
+  31111111
+  32222222
+  32222222
+  33333333
+  11113111
+  22223222
+  22223222
+  33333333`)
+addBG('WALL', WALL)                          // offset courses with a lit top edge
+for (const s of ['B','T','R','L','BR','BL','TR','TL'])   // lit inner rim around the pit,
+  addBG('WALL_'+s, edge(WALL, s, '1'))                   // a dark one would vanish on black
+
+quarters(T(`
+  1111111111111111
+  1222222222222223
+  1222222222222223
+  1223332222333223
+  1222222222222223
+  1222222222222223
+  1223222233322223
+  1222222222222223
+  1222222222222223
+  1222332222222223
+  1222222222222223
+  1222222233222223
+  1222222222222223
+  1223332222233223
+  1222222222222223
+  3333333333333333`)).forEach((t,i) => addBG('STONE'+i, t))
+
+// Every snake tile comes from one silhouette and one shading rule: lit along the top
+// and left, shadowed two deep along the bottom and right so the tube reads as round.
+// A pixel that runs off the tile counts as filled, so neighbouring tiles join with no
+// seam and no notch at a bend. The NES cannot flip background tiles, so all ten are
+// real entries in the pattern table.
+const blank = () => Array.from({length:8}, () => Array(8).fill(0))
+const shade = mask => mask.map((row,y) => row.map((on,x) => {
+  if (!on) return 0
+  const nb = (dx,dy) => { const r = mask[y+dy]
+    return !r || x+dx < 0 || x+dx > 7 ? 1 : r[x+dx] }   // off-tile continues the body
+  if (!nb(0,-1)) return 3
+  if (!nb(0,1) || !nb(0,2)) return 1
+  if (!nb(-1,0)) return 3
+  if (!nb(1,0) || !nb(2,0)) return 1
+  return 2
+}).join(''))
+
+const joint = dirs => {                     // 6x6 body plus a stub toward each opening
+  const m = blank()
+  for (let y = 1; y <= 6; y++) for (let x = 1; x <= 6; x++) m[y][x] = 1
+  if (dirs.includes('L')) for (let y = 1; y <= 6; y++) m[y][0] = 1
+  if (dirs.includes('R')) for (let y = 1; y <= 6; y++) m[y][7] = 1
+  if (dirs.includes('U')) for (let x = 1; x <= 6; x++) m[0][x] = 1
+  if (dirs.includes('D')) for (let x = 1; x <= 6; x++) m[7][x] = 1
+  return m
+}
+const tailMask = () => {                    // tapers to a tip on the left, joins on the right
+  const m = blank()
+  ;[[3,4],[2,5],[2,5],[1,6],[1,6],[1,6],[1,6],[1,6]].forEach(([a,b],x) => {
+    for (let y = a; y <= b; y++) m[y][x] = 1 })
+  return m
+}
+const mirrorX = m => m.map(r => [...r].reverse())
+const mirrorY = m => [...m].reverse()
+const flipDiag = m => m[0].map((_,x) => m.map(r => r[x]))
+
+addBG('BODY_H', shade(joint('LR')))
+addBG('BODY_V', shade(joint('UD')))
+for (const d of ['DL','DR','LU','RU']) addBG('CORNER_'+d, shade(joint(d)))
+addBG('TAIL_R', shade(tailMask()))          // named for where the neck is, not the tip
+addBG('TAIL_L', shade(mirrorX(tailMask())))
+addBG('TAIL_D', shade(flipDiag(tailMask())))
+addBG('TAIL_U', shade(mirrorY(flipDiag(tailMask()))))
+
+// 5x7 glyphs padded into 8x8 tiles. Text is background tiles, as on any NES cart.
+const FONT = {
+  A:'01110 10001 10001 11111 10001 10001 10001', B:'11110 10001 11110 10001 10001 10001 11110',
+  C:'01110 10001 10000 10000 10000 10001 01110', D:'11100 10010 10001 10001 10001 10010 11100',
+  E:'11111 10000 10000 11110 10000 10000 11111', F:'11111 10000 10000 11110 10000 10000 10000',
+  G:'01110 10001 10000 10111 10001 10001 01111', H:'10001 10001 10001 11111 10001 10001 10001',
+  I:'01110 00100 00100 00100 00100 00100 01110', J:'00111 00010 00010 00010 00010 10010 01100',
+  K:'10001 10010 10100 11000 10100 10010 10001', L:'10000 10000 10000 10000 10000 10000 11111',
+  M:'10001 11011 10101 10101 10001 10001 10001', N:'10001 11001 10101 10011 10001 10001 10001',
+  O:'01110 10001 10001 10001 10001 10001 01110', P:'11110 10001 10001 11110 10000 10000 10000',
+  Q:'01110 10001 10001 10001 10101 10010 01101', R:'11110 10001 10001 11110 10100 10010 10001',
+  S:'01111 10000 10000 01110 00001 00001 11110', T:'11111 00100 00100 00100 00100 00100 00100',
+  U:'10001 10001 10001 10001 10001 10001 01110', V:'10001 10001 10001 10001 10001 01010 00100',
+  W:'10001 10001 10001 10101 10101 10101 01010', X:'10001 10001 01010 00100 01010 10001 10001',
+  Y:'10001 10001 01010 00100 00100 00100 00100', Z:'11111 00001 00010 00100 01000 10000 11111',
+  0:'01110 10001 10011 10101 11001 10001 01110', 1:'00100 01100 00100 00100 00100 00100 01110',
+  2:'01110 10001 00001 00110 01000 10000 11111', 3:'11111 00010 00100 00010 00001 10001 01110',
+  4:'00010 00110 01010 10010 11111 00010 00010', 5:'11111 10000 11110 00001 00001 10001 01110',
+  6:'00110 01000 10000 11110 10001 10001 01110', 7:'11111 00001 00010 00100 01000 01000 01000',
+  8:'01110 10001 10001 01110 10001 10001 01110', 9:'01110 10001 10001 01111 00001 00010 01100',
+  '-':'00000 00000 00000 01110 00000 00000 00000', '.':'00000 00000 00000 00000 00000 01100 01100',
+  '!':'00100 00100 00100 00100 00100 00000 00100', '(':'00010 00100 01000 01000 01000 00100 00010',
+  ')':'01000 00100 00010 00010 00010 00100 01000'}
+for (const [ch, g] of Object.entries(FONT)) {
+  const rows = g.split(' ').map(r => '0' + r + '00')
+  while (rows.length < 8) rows.push('00000000')
+  addBG('F' + ch, rows)
+}
+
+// Headline font: the small glyph doubled to 10x14, outlined, lit along the top, then
+// cut into four tiles. Generating CHR with a tool is how the art actually got made.
+const bigId = {}
+function bigGlyph(ch){
+  if (bigId[ch] || !FONT[ch]) return
+  const src = FONT[ch].split(' ')
+  const fill = Array.from({length:16}, () => Array(16).fill(0))
+  src.forEach((row,y) => [...row].forEach((p,x) => { if (p === '1')
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) fill[1+y*2+dy][3+x*2+dx] = 1 }))
+  const out = fill.map(r => r.map(() => 0))
+  const at = (x,y) => (fill[y] || [])[x] === 1
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    if (at(x,y)) out[y][x] = at(x, y+1) ? 1 : 2            // white body, grey along the underside
+    else if ([[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]
+             .some(([dx,dy]) => at(x+dx, y+dy))) out[y][x] = 3   // dark outline
+  }
+  bigId[ch] = quarters(out.map(r => r.join(''))).map((t,i) => {
+    addBG('BIG_'+ch+i, t); return bgId['BIG_'+ch+i] })
+}
+for (const ch of 'SNAKEOPTIUGMVR') bigGlyph(ch)
+
+addSPR('HEAD_R', T(`
+  00222200
+  02233020
+  22233022
+  22222222
+  22222222
+  22233022
+  02233020
+  00111100`))
+addSPR('HEAD_U', T(`
+  00222200
+  02222220
+  20022002
+  23322332
+  23322332
+  22222222
+  01111110
+  00111100`))
+addSPR('TONGUE_H', T(`
+  00000000
+  00000000
+  00000020
+  02222200
+  00000020
+  00000000
+  00000000
+  00000000`))
+addSPR('TONGUE_V', T(`
+  00000000
+  00200200
+  00022000
+  00022000
+  00022000
+  00000000
+  00000000
+  00000000`))
+addSPR('APPLE', T(`
+  00011000
+  00221100
+  02322220
+  22322222
+  22222222
+  22222222
+  02222220
+  00222200`))
+addSPR('GEM', T(`
+  00033000
+  00322300
+  03232230
+  32222223
+  03222230
+  00322300
+  00033000
+  00000000`))
+
+// ============================================================ Nametable and attributes
+const NT = new Uint8Array(32*30)            // $2000, 32x30 tiles
+const AT = new Uint8Array(16*15)            // $23C0, one palette per 16x16 block
+let vram = 0                                // tile writes this frame; vblank fits about 32
+const setTile = (x,y,id) => { NT[y*32+x] = id; vram++ }
+const setAttr = (bx,by,p) => AT[by*16+bx] = p
+const write = (x,y,s) => [...s].forEach((c,i) => setTile(x+i, y, bgId['F'+c] ?? bgId.BLANK))
+const bigWrite = (x,y,s) => [...s].forEach((c,i) => {
+  const q = bigId[c]; if (!q) return
+  setTile(x+i*2, y, q[0]);   setTile(x+i*2+1, y, q[1])
+  setTile(x+i*2, y+1, q[2]); setTile(x+i*2+1, y+1, q[3]) })
+
+// ============================================================ OAM
+const OAM = []                              // 64 entries maximum, 8x8 sprites
+let oamRotate = 0
+
+// ============================================================ Raster
+const ctx = tv.getContext('2d')
+const img = ctx.createImageData(256, 240)
+const buf = new Uint32Array(img.data.buffer)
+const scan = new Uint8Array(240)            // sprites already placed on each scanline
+
+function render(){
+  for (let ty = 0; ty < 30; ty++) for (let tx = 0; tx < 32; tx++) {
+    const tile = bgChr[NT[ty*32+tx]], pal = BGPAL[AT[(ty>>1)*16 + (tx>>1)]]
+    for (let y = 0; y < 8; y++) {
+      const row = tile[y], o = (ty*8+y)*256 + tx*8
+      for (let x = 0; x < 8; x++) buf[o+x] = RGB[pal[+row[x]]]
+    }
+  }
+  scan.fill(0)
+  for (let i = 0; i < OAM.length; i++) {
+    const s = OAM[(i + oamRotate) % OAM.length], tile = sprChr[s.tile], pal = SPRPAL[s.pal]
+    for (let y = 0; y < 8; y++) {
+      const sy = s.y + y                    // hardware stores y-1; drawn here at face value
+      if (sy < 0 || sy >= 240) continue
+      if (scan[sy] >= 8) continue           // the ninth sprite on a scanline is dropped
+      scan[sy]++
+      const row = tile[s.fv ? 7-y : y]
+      for (let x = 0; x < 8; x++) {
+        const px = +row[s.fh ? 7-x : x]     // colour 0 is transparent on sprites
+        if (px && s.x+x >= 0 && s.x+x < 256) buf[sy*256 + s.x+x] = RGB[pal[px]]
+      }
+    }
+  }
+  if (OAM.length > 8) oamRotate++           // cycle priority so dropouts flicker evenly
+  ctx.putImageData(img, 0, 0)
+}
+
+// ============================================================ APU
+let AC, voices = [], musicEnds = 0
+function pulse(f, dur, when, duty, vol){
+  const n = 32, re = new Float32Array(n), im = new Float32Array(n)
+  for (let i = 1; i < n; i++) im[i] = 2/(i*Math.PI) * Math.sin(Math.PI*i*duty)
+  const o = AC.createOscillator(), g = AC.createGain()
+  o.setPeriodicWave(AC.createPeriodicWave(re, im))
+  const p = Math.max(8, Math.min(2047, Math.round(1789773/(16*f)) - 1))
+  o.frequency.value = 1789773 / (16*(p+1))  // 11-bit period, the same rounding the APU does
+  g.gain.setValueAtTime(vol, when); g.gain.setTargetAtTime(0, when + dur*0.6, 0.03)
+  o.connect(g).connect(AC.destination); o.start(when); o.stop(when + dur + 0.1)
+  voices.push(o)
+  if (voices.length > 48) voices = voices.slice(-48)
+}
+function sfx(notes){
+  if (!AC || opt.sound === 'OFF') return
+  let t = AC.currentTime
+  for (const [f, d, duty] of notes) { pulse(f, d, t, duty ?? 0.25, 0.05); t += d }
+}
+const SEMI = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11}
+const hz = tok => { const m = /^([A-G]#?)(\d)$/.exec(tok)
+  return 440 * Math.pow(2, (SEMI[m[1]] + (+m[2]+1)*12 - 69) / 12) }
+function chan(score, tempo, duty, vol, when){   // one voice of a tracker-style score
+  let t = when
+  for (const tok of score.split(' ')) {
+    const [n, d] = tok.split(':'), len = (+d || 1) * tempo
+    if (n !== 'R') pulse(hz(n), len*0.85, t, duty, vol)
+    t += len
+  }
+  return t - when
+}
+function stopMusic(){ for (const o of voices) { try { o.stop() } catch {} } voices = []; musicEnds = 0 }
+
+const TITLE_MEL = 'G4:2 C5:2 E5:2 G5:2 E5:1 G5:1 A5:4 G5:2 E5:2 C5:2 E5:2 D5:4 R:2 '+
+                  'F4:2 A4:2 C5:2 F5:2 C5:1 F5:1 A5:4 G5:2 E5:2 C5:2 D5:2 C5:6'
+const TITLE_BASS = 'C3:8 C3:6 G3:6 A3:6 F3:6 G3:6 C3:8 G3:8'
+function titleMusic(){
+  if (!AC || opt.sound === 'OFF') return
+  const t = AC.currentTime + 0.05
+  const len = chan(TITLE_MEL, 0.115, 0.25, 0.045, t)
+  chan(TITLE_BASS, 0.115, 0.5, 0.03, t)
+  musicEnds = t + len + 0.4                  // the frame clock restarts it, so it loops
+}
+
+// ============================================================ Joypad
+const KEYS = {ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R',
+              KeyW:'U', KeyS:'D', KeyA:'L', KeyD:'R',
+              Enter:'START', Space:'A', KeyZ:'A', KeyX:'B',
+              ShiftLeft:'SELECT', ShiftRight:'SELECT', Tab:'SELECT'}
+const pad = {}, was = {}
+onkeydown = e => {
+  const b = KEYS[e.code]; if (!b) return
+  e.preventDefault()
+  if (!AC) { AC = new AudioContext(); if (state === 'TITLE') titleMusic() } else AC.resume()
+  pad[b] = 1
+  if (b === 'L') pad.R = 0; if (b === 'R') pad.L = 0   // a d-pad cannot press opposites
+  if (b === 'U') pad.D = 0; if (b === 'D') pad.U = 0
+}
+onkeyup = e => { const b = KEYS[e.code]; if (b) pad[b] = 0 }
+const hit = b => pad[b] && !was[b]
+
+// ============================================================ Cart settings
+const OPTIONS = [
+  {k:'mode',  label:'MODE',   vals:['CLASSIC','WRAP','MAZE','SPRINT']},
+  {k:'speed', label:'SPEED',  vals:['SLOW','NORMAL','FAST','TURBO']},
+  {k:'skin',  label:'COLOUR', vals:['GREEN','BLUE','GOLD','ICE']},
+  {k:'bonus', label:'BONUS',  vals:['ON','OFF']},
+  {k:'sound', label:'SOUND',  vals:['ON','OFF']}]
+const BASE = {SLOW:12, NORMAL:9, FAST:6, TURBO:4}       // frames between moves
+
+let opt = {mode:'CLASSIC', speed:'NORMAL', skin:'GREEN', bonus:'ON', sound:'ON'}
+let tops = {CLASSIC:0, WRAP:0, MAZE:0, SPRINT:0}
+try {                                                    // battery-backed save
+  Object.assign(opt, JSON.parse(localStorage.snakeOpt || '{}'))
+  Object.assign(tops, JSON.parse(localStorage.snakeTops || '{}'))
+} catch {}
+const saveRam = () => { try {
+  localStorage.snakeOpt = JSON.stringify(opt); localStorage.snakeTops = JSON.stringify(tops)
+} catch {} }
+function applySkin(){ const s = SKINS[opt.skin]; BGPAL[1] = s.bg.slice(); SPRPAL[0] = s.spr.slice() }
+
+// ============================================================ Playfield
+const FX = 2, FY = 6, FW = 28, FH = 22      // aligned to 16x16 attribute blocks
+const MW = FW>>1, MH = FH>>1                // maze grid, one entry per attribute block
+const DIR = {R:[1,0], L:[-1,0], U:[0,-1], D:[0,1]}
+const OPP = {L:'R', R:'L', U:'D', D:'U'}
+const dirOf = (dx,dy) => dx>0 ? 'R' : dx<0 ? 'L' : dy>0 ? 'D' : 'U'
+const near = (a,b,n) => { let d = a-b; if (d > 1) d -= n; if (d < -1) d += n; return d }
+const pad3 = n => ('00' + n).slice(-3)
+const pad6 = n => ('00000' + n).slice(-6)
+const ground = (x,y) => bgId[!(x & 1) && !(y & 1) ? 'FIELD_D' : 'FIELD']   // one motif per block
+
+// Obstacles are 16x16, because an 8x8 one could not carry its own palette.
+const MAZES = [
+  ['..............',
+   '.###......###.',
+   '.#..........#.',
+   '..............',
+   '..............',
+   '..............',
+   '..............',
+   '..............',
+   '.#..........#.',
+   '.###......###.',
+   '..............'],
+  ['..............',
+   '...##....##...',
+   '...##....##...',
+   '..............',
+   '..............',
+   '..............',
+   '..............',
+   '...##....##...',
+   '...##....##...',
+   '..............',
+   '..............'],
+  ['..............',
+   '..............',
+   '..####..####..',
+   '..............',
+   '..............',
+   '..............',
+   '..............',
+   '..####..####..',
+   '..............',
+   '..............',
+   '..............']]
+
+let snake, dir, next, food, bonus, bonusLeft, score, state, frame, timer, clock, maze, cursor
+const solid = (x,y) => !!maze && maze[y>>1][x>>1] === '#'
+
+// ============================================================ Screen drawing
+function wallTile(x,y){                     // the frame is bevelled into the playfield
+  const acrossField = x >= 2 && x <= 29, downField = y >= 6 && y <= 27
+  if (y === 5)  return acrossField ? 'WALL_B' : x === 1 ? 'WALL_BR' : x === 30 ? 'WALL_BL' : 'WALL'
+  if (y === 28) return acrossField ? 'WALL_T' : x === 1 ? 'WALL_TR' : x === 30 ? 'WALL_TL' : 'WALL'
+  if (downField) return x === 1 ? 'WALL_R' : x === 30 ? 'WALL_L' : 'WALL'
+  return 'WALL'
+}
+function chrome(){                          // HUD, wall and empty playfield
+  NT.fill(bgId.BLANK); AT.fill(0)
+  for (let y = 4; y < 30; y++) for (let x = 0; x < 32; x++)
+    if (y < 6 || y > 27 || x < 2 || x > 29) setTile(x, y, bgId[wallTile(x,y)])
+  for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) setTile(FX+x, FY+y, ground(x,y))
+  for (let by = 3; by <= 13; by++) for (let bx = 1; bx <= 14; bx++) setAttr(bx, by, 1)
+  write(2,1,'SCORE'); write(23,1,'TOP')
+  hud()
+}
+function drawMaze(){
+  if (!maze) return
+  for (let my = 0; my < MH; my++) for (let mx = 0; mx < MW; mx++) {
+    if (maze[my][mx] !== '#') continue
+    setAttr(mx+1, my+3, 2)                  // stone gets its own attribute block
+    for (let i = 0; i < 4; i++)
+      setTile(FX + mx*2 + (i&1), FY + my*2 + (i>>1), bgId['STONE'+i])
+  }
+}
+function hud(){
+  const sprint = opt.mode === 'SPRINT'
+  write(2,2, pad6(score|0))
+  write(13,1, sprint ? 'TIME' : 'LEN ')
+  write(13,2, pad3(sprint ? Math.ceil(clock/60) : (snake ? snake.length : 0)))
+  write(23,2, pad6(tops[opt.mode]|0))
+}
+function band(y, h, p){                     // clear tiles and repaint attributes, 2-row aligned
+  for (let ty = y; ty < y+h; ty++) for (let tx = FX; tx < FX+FW; tx++) setTile(tx, ty, bgId.BLANK)
+  for (let by = y>>1; by < (y+h)>>1; by++) for (let bx = 1; bx <= 14; bx++) setAttr(bx, by, p)
+}
+const center = (y, s) => write(FX + ((FW - s.length) >> 1), y, s)
+const bigCenter = (y, s) => bigWrite(FX + ((FW - s.length*2) >> 1), y, s)
+
+function paint(i){
+  if (i < 1 || i >= snake.length) return
+  const c = snake[i], p = snake[i-1], n = snake[i+1]
+  const dp = dirOf(near(p.x,c.x,FW), near(p.y,c.y,FH))
+  let id
+  if (!n) id = bgId['TAIL_'+dp]
+  else {
+    const dn = dirOf(near(n.x,c.x,FW), near(n.y,c.y,FH))
+    id = dp === OPP[dn] ? bgId[dp==='L'||dp==='R' ? 'BODY_H' : 'BODY_V']
+                        : bgId['CORNER_' + [dp,dn].sort().join('')]
+  }
+  setTile(FX+c.x, FY+c.y, id)
+}
+const paintAll = () => { for (let i = 1; i < snake.length; i++) paint(i) }
+
+function freeCell(){
+  let c, guard = 0
+  do { c = {x: ~~(Math.random()*FW), y: ~~(Math.random()*FH)} } while (++guard < 500 &&
+    (solid(c.x,c.y) || snake.some(p => p.x===c.x && p.y===c.y) ||
+     (food && food.x===c.x && food.y===c.y) || (bonus && bonus.x===c.x && bonus.y===c.y)))
+  return c
+}
+
+// ============================================================ Screens
+function title(){
+  state = 'TITLE'; score = 0; frame = 0; maze = null; bonus = null; clock = 60*60
+  applySkin()
+  snake = [11,10,9,8,7,6,5,4].map(x => ({x, y:11})); dir = next = 'R'
+  food = {x:15, y:11}
+  chrome(); paintAll()
+  band(8,2,0);  bigCenter(8,'SNAKE')
+  band(12,2,0)
+  band(14,2,0); center(14,'SELECT  OPTIONS')
+  band(20,2,0); center(20, opt.mode + '   ' + opt.speed)
+  band(26,2,0); center(26,'(C) 2026 MOTCH')
+  if (AC && !musicEnds) titleMusic()
+}
+
+function options(){
+  state = 'OPTIONS'; cursor = 0
+  chrome()
+  band(8,2,0); bigCenter(8,'OPTIONS')
+  band(24,2,0); center(24,'START  BACK')
+  drawOptions()
+}
+function drawOptions(){
+  OPTIONS.forEach((o,i) => {
+    const y = 12 + i*2
+    band(y,2,0)
+    write(7, y, o.label)
+    write(16, y, (opt[o.k] + '        ').slice(0,8))
+  })
+}
+
+function start(){
+  state = 'PLAY'; score = 0; frame = 0; bonus = null; bonusLeft = 0
+  clock = 60*60                                     // SPRINT clock, in frames
+  maze = opt.mode === 'MAZE' ? MAZES[~~(Math.random()*MAZES.length)] : null
+  applySkin(); stopMusic()
+  snake = [14,13,12,11].map(x => ({x, y:11})); dir = next = 'R'
+  chrome(); drawMaze(); paintAll()
+  food = freeCell(); hud()
+  sfx([[523,.08],[659,.08],[784,.16]])
+}
+
+function die(msg){
+  state = 'OVER'; timer = 0
+  sfx([[392,.12,.5],[311,.12,.5],[233,.34,.5]])
+  if (score > (tops[opt.mode]|0)) { tops[opt.mode] = score; saveRam() }
+  band(14,4,0); bigCenter(14, msg); hud()
+}
+
+// ============================================================ Move
+function step(){
+  vram = 0
+  dir = next
+  const [dx,dy] = DIR[dir]
+  const h = {x: snake[0].x+dx, y: snake[0].y+dy}
+  if (opt.mode === 'WRAP') { h.x = (h.x+FW)%FW; h.y = (h.y+FH)%FH }
+  else if (h.x < 0 || h.y < 0 || h.x >= FW || h.y >= FH) return die('GAME OVER')
+  if (solid(h.x, h.y)) return die('GAME OVER')
+  if (snake.slice(0,-1).some(p => p.x===h.x && p.y===h.y)) return die('GAME OVER')
+
+  snake.unshift(h)
+  let grew = false
+  if (h.x === food.x && h.y === food.y) {
+    grew = true; score++; food = freeCell(); sfx([[988,.04],[1319,.07]])
+    if (opt.bonus === 'ON' && score % 5 === 0) { bonus = freeCell(); bonusLeft = 420
+      sfx([[1047,.05],[1319,.05],[1568,.09]]) }
+  }
+  if (bonus && h.x === bonus.x && h.y === bonus.y) {
+    score += 5; bonus = null; bonusLeft = 0
+    sfx([[1568,.05],[1319,.05],[1760,.05],[2093,.12]])
+  }
+  if (!grew) { const t = snake.pop(); setTile(FX+t.x, FY+t.y, ground(t.x,t.y)) }
+  paint(1); paint(2); paint(snake.length-1)
+  hud()
+  console.assert(vram <= 32, 'exceeded the vblank VRAM budget')
+}
+
+function buildOAM(){
+  OAM.length = 0                            // apple, head, tongue and gem: 4 of the 64 slots
+  if (state === 'OPTIONS') {                // the head doubles as the menu cursor
+    OAM.push({x: 5*8, y: (12 + cursor*2)*8, tile: sprId.HEAD_R, pal: 0})
+    return
+  }
+  OAM.push({x:(FX+food.x)*8, y:(FY+food.y)*8, tile:sprId.APPLE, pal:1})
+  if (bonus && (bonusLeft > 150 || (bonusLeft>>2) & 1))   // blinks out as it runs down
+    OAM.push({x:(FX+bonus.x)*8, y:(FY+bonus.y)*8, tile:sprId.GEM, pal:2})
+  const h = snake[0], hx = (FX+h.x)*8, hy = (FY+h.y)*8
+  const vert = dir === 'U' || dir === 'D'
+  if (state === 'PLAY' && frame % 260 < 6) {   // the tongue flicks every four seconds or so
+    const [dx,dy] = DIR[dir]
+    OAM.push({x: hx + dx*6, y: hy + dy*6, pal: 1,
+              tile: vert ? sprId.TONGUE_V : sprId.TONGUE_H,
+              fh: dir === 'L' ? 1 : 0, fv: dir === 'D' ? 1 : 0})
+  }
+  OAM.push({x: hx, y: hy, pal: 0,           // heads face L and D by hardware flip
+            tile: vert ? sprId.HEAD_U : sprId.HEAD_R,
+            fh: dir === 'L' ? 1 : 0, fv: dir === 'D' ? 1 : 0})
+  console.assert(OAM.length <= 64, 'OAM holds 64 sprites')
+}
+
+// ============================================================ Frame
+function tick(){
+  frame++
+  if (AC && musicEnds && AC.currentTime > musicEnds &&
+      (state === 'TITLE' || state === 'OPTIONS')) titleMusic()   // the jingle loops on both menus
+
+  if (state === 'TITLE') {
+    if (frame % 30 === 0) { band(12,2,0); if (frame % 60 === 0) center(12,'PUSH START') }
+    if (hit('SELECT')) { sfx([[784,.06]]); options() }
+    else if (hit('START') || hit('A')) start()
+
+  } else if (state === 'OPTIONS') {
+    const o = OPTIONS[cursor]
+    if (hit('U')) { cursor = (cursor + OPTIONS.length - 1) % OPTIONS.length; sfx([[659,.04]]); drawOptions() }
+    else if (hit('D')) { cursor = (cursor + 1) % OPTIONS.length; sfx([[659,.04]]); drawOptions() }
+    else if (hit('L') || hit('R')) {
+      const i = o.vals.indexOf(opt[o.k]) + (hit('R') ? 1 : o.vals.length - 1)
+      opt[o.k] = o.vals[i % o.vals.length]
+      applySkin(); saveRam(); sfx([[880,.05]]); drawOptions()
+    } else if (hit('START') || hit('B')) { sfx([[784,.06]]); title() }
+
+  } else if (state === 'PLAY') {
+    for (const b of ['U','D','L','R']) if (hit(b) && b !== OPP[dir]) { next = b; break }
+    if (hit('START')) { state = 'PAUSE'; band(14,2,0); bigCenter(14,'PAUSE'); sfx([[1047,.08]]); return sync() }
+    if (bonusLeft && --bonusLeft === 0) bonus = null
+    if (opt.mode === 'SPRINT') {
+      if (clock % 60 === 0) hud()
+      if (--clock <= 0) { clock = 0; hud(); die('TIME UP'); return sync() }
+      if (clock < 600 && clock % 60 === 0) sfx([[1047,.05]])   // last ten seconds tick
+    }
+    if (frame % Math.max(3, BASE[opt.speed] - ((score/6)|0)) === 0) step()
+
+  } else if (state === 'PAUSE') {
+    if (hit('START')) { state = 'PLAY'; band(14,2,1)
+      for (let y = 14; y < 16; y++) for (let x = 0; x < FW; x++) setTile(FX+x, y, ground(x, y-FY))
+      drawMaze(); paintAll(); sfx([[1047,.08]]) }
+
+  } else if (state === 'OVER') {
+    if (++timer === 90) center(17,'PUSH START')
+    if (timer > 90 && (hit('START') || hit('A'))) title()
+  }
+  return sync()
+}
+const sync = () => Object.assign(was, pad)
+
+// ============================================================ NTSC frame clock
+const FRAME = 1000/60.0988
+let acc = 0, last = performance.now()
+function loop(now){
+  acc += now - last; last = now
+  if (acc > FRAME*8) acc = FRAME              // dropped frames, do not fast-forward
+  while (acc >= FRAME) { acc -= FRAME; tick() }
+  buildOAM(); render()
+  requestAnimationFrame(loop)
+}
+
+function selfTest(){
+  const ok = (c,m) => { if (!c) throw Error('NES limit broken: ' + m) }
+  ok(bgChr.length <= 256, 'background pattern table holds 256 tiles')
+  ok(sprChr.length <= 256, 'sprite pattern table holds 256 tiles')
+  for (const t of [...bgChr, ...sprChr]) {
+    ok(t.length === 8, 'a tile is 8 rows')
+    for (const r of t) ok(/^[0-3]{8}$/.test(r), 'a row is 8 pixels of 2bpp data')
+  }
+  for (const p of [...BGPAL, ...SPRPAL, ...Object.values(SKINS).flatMap(s => [s.bg, s.spr])]) {
+    ok(p.length === 4, 'a sub-palette holds 4 entries')
+    for (const c of p) ok(c >= 0 && c < 64, 'colours come from the 64-entry master palette')
+  }
+  ok(BGPAL.every(p => p[0] === UNIVERSAL), 'entry 0 mirrors the universal colour')
+  ok(NT.length === 32*30 && AT.length === 16*15, 'nametable is 32x30 with a 16x15 attribute table')
+  for (const m of MAZES) {
+    ok(m.length === MH && m.every(r => r.length === MW), 'a maze grid is 14x11 attribute blocks')
+    ok(m[5].slice(4,10) === '......', 'the start row stays clear of stone')
+  }
+  for (const o of OPTIONS) ok(o.vals.includes(opt[o.k]), 'saved setting ' + o.k + ' is a legal value')
+  for (const s of ['SNAKE','OPTIONS','PAUSE','GAME OVER','TIME UP'])
+    for (const c of s.replace(/ /g,'')) ok(bigId[c], 'headline glyph ' + c + ' is in CHR')
+  console.log('CHR ' + bgChr.length + '+' + sprChr.length + ' of 256 tiles. All hardware checks pass.')
+}
+
+selfTest(); title(); requestAnimationFrame(loop)
+
+// Debug handle. Lets you single-step from the console and inspect state without a controller.
+window.NES = { tick, render, buildOAM,
+  press: b => { pad[b] = 1; tick(); pad[b] = 0; tick() },
+  peek: () => ({state, score, dir, len: snake.length, mode: opt.mode, opt, tops,
+                clock, food, bonus, maze, cursor, oam: OAM.length, vram, head: snake[0],
+                chr: [bgChr.length, sprChr.length]}),
+  set: o => Object.assign(opt, o) }
+})()
+</script>
