@@ -1,15 +1,21 @@
 <title>SNAKE</title>
 <style>
   html,body{background:#000;margin:0;height:100%;display:grid;place-items:center;overflow:hidden;
-    touch-action:none;-webkit-user-select:none;user-select:none}
-  canvas{width:min(768px,96vw);aspect-ratio:256/240;image-rendering:pixelated}
+    gap:1rem;touch-action:none;-webkit-user-select:none;user-select:none}
+  canvas{width:min(768px,96vw,82vh);aspect-ratio:256/240;image-rendering:pixelated}
+  a.board{
+    color:#7C7C7C;text-decoration:none;font:700 13px/1 monospace;letter-spacing:.14em;
+    border:2px solid #7C7C7C;padding:.7rem 1.1rem;
+  }
+  a.board:hover,a.board:focus{border-color:#B8F818;color:#B8F818}
   #pad{position:fixed;inset:auto 0 0 0;display:none;justify-content:space-between;padding:.6rem}
-  @media (pointer:coarse){#pad{display:flex}}
-  #pad button{font:700 13px/1 monospace;letter-spacing:.12em;color:#bcbcbc;background:#000;
-    border:2px solid #444;border-radius:6px;padding:.9rem 1.4rem}
-  #pad button:active{background:#222;color:#f8f8f8;border-color:#7c7c7c}
+  body.touch #pad{display:flex}
+  #pad button{font:700 13px/1 monospace;letter-spacing:.12em;color:#BCBCBC;background:#000;
+    border:2px solid #7C7C7C;padding:.9rem 1.4rem}
+  #pad button:active{background:#B8F818;border-color:#B8F818;color:#000}
 </style>
 <canvas id=tv width=256 height=240></canvas>
+<a class=board href="scores.html">SCORES + COMMENTS</a>
 <div id=pad><button data-b=SELECT>SELECT</button><button data-b=B>B</button></div>
 <script>
 (() => {
@@ -390,11 +396,11 @@ function tap(b){
 }
 let tx = 0, ty = 0
 document.addEventListener('touchstart', e => {
-  if (e.target.closest('#pad')) return
+  if (opt.input !== 'TOUCH' || e.target.closest('#pad')) return
   const t = e.changedTouches[0]; tx = t.clientX; ty = t.clientY
 })
 document.addEventListener('touchend', e => {
-  if (e.target.closest('#pad')) return
+  if (opt.input !== 'TOUCH' || e.target.closest('#pad')) return
   const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty
   if (Math.abs(dx) < 24 && Math.abs(dy) < 24) tap('START')      // tap confirms, like A
   else tap(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U'))
@@ -409,19 +415,25 @@ const OPTIONS = [
   {k:'speed', label:'SPEED',  vals:['SLOW','NORMAL','FAST','TURBO']},
   {k:'skin',  label:'COLOUR', vals:['GREEN','BLUE','GOLD','ICE']},
   {k:'bonus', label:'BONUS',  vals:['ON','OFF']},
-  {k:'sound', label:'SOUND',  vals:['ON','OFF']}]
+  {k:'sound', label:'SOUND',  vals:['ON','OFF']},
+  {k:'input', label:'INPUT',  vals:['TOUCH','KEYS']}]
 const BASE = {SLOW:12, NORMAL:9, FAST:6, TURBO:4}       // frames between moves
+const COARSE = typeof matchMedia === 'function' && matchMedia('(pointer:coarse)').matches
 
-let opt = {mode:'CLASSIC', speed:'NORMAL', skin:'GREEN', bonus:'ON', sound:'ON'}
+let opt = {mode:'CLASSIC', speed:'NORMAL', skin:'GREEN', bonus:'ON', sound:'ON',
+           input: COARSE ? 'TOUCH' : 'KEYS'}
 let tops = {CLASSIC:0, WRAP:0, MAZE:0, SPRINT:0}
+let lastRun = null                                      // scores.html reads this back
 try {                                                    // battery-backed save
   Object.assign(opt, JSON.parse(localStorage.snakeOpt || '{}'))
   Object.assign(tops, JSON.parse(localStorage.snakeTops || '{}'))
 } catch {}
 const saveRam = () => { try {
   localStorage.snakeOpt = JSON.stringify(opt); localStorage.snakeTops = JSON.stringify(tops)
+  if (lastRun) localStorage.snakeRun = JSON.stringify(lastRun)
 } catch {} }
 function applySkin(){ const s = SKINS[opt.skin]; BGPAL[1] = s.bg.slice(); SPRPAL[0] = s.spr.slice() }
+const applyInput = () => document.body.classList.toggle('touch', opt.input === 'TOUCH')
 
 // ============================================================ Playfield
 const FX = 2, FY = 6, FW = 28, FH = 22      // aligned to 16x16 attribute blocks
@@ -539,7 +551,7 @@ function freeCell(){
 // ============================================================ Screens
 function title(){
   state = 'TITLE'; score = 0; frame = 0; maze = null; bonus = null; clock = 60*60
-  applySkin()
+  applySkin(); applyInput()
   snake = [11,10,9,8,7,6,5,4].map(x => ({x, y:11})); dir = next = 'R'
   food = {x:15, y:11}
   chrome(); paintAll()
@@ -547,6 +559,7 @@ function title(){
   band(12,2,0)
   band(14,2,0); center(14,'SELECT  OPTIONS')
   band(20,2,0); center(20, opt.mode + '   ' + opt.speed)
+  band(22,2,0); center(22,'B  SCORES  COMMENTS')
   band(26,2,0); center(26,'(C) 2026 MOTCH')
   if (AC && !musicEnds) titleMusic()
 }
@@ -581,7 +594,9 @@ function start(){
 function die(msg){
   state = 'OVER'; timer = 0
   sfx([[392,.12,.5],[311,.12,.5],[233,.34,.5]])
-  if (score > (tops[opt.mode]|0)) { tops[opt.mode] = score; saveRam() }
+  lastRun = {score, mode: opt.mode, at: Date.now()}     // the score comments carry
+  if (score > (tops[opt.mode]|0)) tops[opt.mode] = score
+  saveRam()
   band(14,4,0); bigCenter(14, msg); hud()
 }
 
@@ -646,6 +661,7 @@ function tick(){
     if (frame % 30 === 0) { band(12,2,0); if (frame % 60 === 0) center(12,'PUSH START') }
     if (hit('SELECT')) { sfx([[784,.06]]); options() }
     else if (hit('START') || hit('A')) start()
+    else if (hit('B')) { sfx([[784,.06]]); location.href = 'scores.html' }
 
   } else if (state === 'OPTIONS') {
     const o = OPTIONS[cursor]
@@ -654,7 +670,7 @@ function tick(){
     else if (hit('L') || hit('R')) {
       const i = o.vals.indexOf(opt[o.k]) + (hit('R') ? 1 : o.vals.length - 1)
       opt[o.k] = o.vals[i % o.vals.length]
-      applySkin(); saveRam(); sfx([[880,.05]]); drawOptions()
+      applySkin(); applyInput(); saveRam(); sfx([[880,.05]]); drawOptions()
     } else if (hit('START') || hit('B')) { sfx([[784,.06]]); title() }
 
   } else if (state === 'PLAY') {
@@ -674,8 +690,9 @@ function tick(){
       drawMaze(); paintAll(); sfx([[1047,.08]]) }
 
   } else if (state === 'OVER') {
-    if (++timer === 90) center(17,'PUSH START')
-    if (timer > 90 && (hit('START') || hit('A'))) title()
+    if (++timer === 90) { band(18,2,0); center(17,'PUSH START'); center(19,'B  POST SCORE') }
+    if (timer > 90 && hit('B')) { sfx([[784,.06]]); location.href = 'scores.html' }
+    else if (timer > 90 && (hit('START') || hit('A'))) title()
   }
   return sync()
 }

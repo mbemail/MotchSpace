@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>MotchSpace &middot; Scores</title>
+<style>
+  /* Drawn from the cart's own NES master palette: $0F black, $00 grey, $10 light grey,
+     $30 white, $29 snake green, $28 gold, $17 orange. Square corners, lit top edges -
+     the same rules the wall and stone tiles follow on the canvas. */
+  :root{
+    --black:#000; --white:#F8F8F8; --grey:#BCBCBC; --dim:#7C7C7C;
+    --green:#B8F818; --gold:#F8B800; --red:#E45C10;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--black);color:var(--grey);
+    font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    padding:0 max(12px,env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom))
+             max(12px,env(safe-area-inset-left));
+  }
+  header{
+    position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;
+    padding:12px 0;background:var(--black);border-bottom:2px solid var(--dim);
+    box-shadow:0 2px 0 var(--black);
+  }
+  h1{margin:0;font-size:14px;letter-spacing:.16em;color:var(--green);text-transform:uppercase}
+  h1 span{color:var(--dim);font-weight:400;letter-spacing:.06em}
+  .back{
+    margin-left:auto;flex:none;color:var(--gold);text-decoration:none;font-size:13px;
+    letter-spacing:.1em;border:2px solid var(--dim);padding:7px 11px;
+  }
+  .back:hover{border-color:var(--gold)}
+  main{display:grid;gap:22px;padding-top:18px}
+  @media (orientation:landscape),(min-width:760px){
+    main{grid-template-columns:minmax(0,1fr) minmax(0,1.35fr);gap:26px;align-items:start}
+    header{padding:8px 0}
+  }
+  section{min-width:0}
+  h2{margin:0 0 10px;font-size:11px;letter-spacing:.18em;color:var(--dim);text-transform:uppercase}
+  h2::before{content:'\25B8';color:var(--green);margin-right:8px}
+  ol,ul{margin:0;padding:0;list-style:none}
+  .card{
+    background:var(--black);border:2px solid var(--dim);border-top-color:var(--grey);
+    padding:10px 12px;margin-bottom:8px;overflow-wrap:anywhere;
+  }
+  .row{display:flex;align-items:baseline;gap:10px}
+  .row .n{flex:none;width:1.8em;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+  .row .who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--white)}
+  .row .mode{margin-left:auto;flex:none;color:var(--dim);font-size:11px}
+  .row .sc{flex:none;color:var(--green);font-variant-numeric:tabular-nums}
+  .meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:5px}
+  .meta .who{font-weight:700;color:var(--white)}
+  .badge{
+    flex:none;background:var(--black);border:1px solid var(--dim);
+    padding:1px 6px;font-size:11px;color:var(--gold);
+  }
+  .when{margin-left:auto;color:var(--dim);font-size:11px}
+  .body{margin:0;white-space:pre-wrap}
+  form{
+    display:grid;gap:10px;background:var(--black);border:2px solid var(--dim);
+    border-top-color:var(--grey);padding:12px;margin-bottom:14px;
+  }
+  label{display:grid;gap:4px;font-size:11px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+  input,textarea,select,button{
+    width:100%;font:inherit;color:var(--white);background:var(--black);
+    border:2px solid var(--dim);padding:9px 10px;
+  }
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--green)}
+  textarea{resize:vertical;min-height:72px}
+  button{background:var(--green);border-color:var(--green);color:var(--black);font-weight:700;
+    letter-spacing:.12em;cursor:pointer}
+  button:hover:not(:disabled){background:var(--white);border-color:var(--white)}
+  button:disabled{background:var(--black);border-color:var(--dim);color:var(--dim);cursor:not-allowed}
+  .note{margin:0;font-size:12px;color:var(--dim)}
+  .note.bad{color:var(--red)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Scores<span> &middot; comments</span></h1>
+  <a class="back" href="index.html">Back to game</a>
+</header>
+<main>
+  <section>
+    <h2>Top runs</h2>
+    <ol id="top"><li class="card note">Loading&hellip;</li></ol>
+  </section>
+  <section>
+    <h2>Comments</h2>
+    <form id="post">
+      <label>Score to attach<select id="run"></select></label>
+      <label>Name<input id="name" maxlength="16" autocomplete="nickname" required></label>
+      <label>Comment (optional)<textarea id="body" maxlength="400"></textarea></label>
+      <button id="send" type="submit">Post</button>
+      <p class="note" id="msg"></p>
+    </form>
+    <ul id="feed"><li class="card note">Loading&hellip;</li></ul>
+  </section>
+</main>
+<script>
+(() => {
+'use strict'
+// Fill these in from Supabase > Project Settings > API. The anon key is meant to be
+// public: the row-level security policies, not this file, are what stop abuse.
+const SB   = 'https://iwiddxnkwwocoooenpsp.supabase.co/rest/v1/'
+const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml3aWRkeG5rd3dvY29vb2VucHNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk2MjU4NzMsImV4cCI6MjEwNTIwMTg3M30.TJoPI1Zu_cUITkpIKVhID-l18MbVc6AVqEibLgBIwGU'
+const H    = {apikey: ANON, Authorization: 'Bearer ' + ANON}
+
+const $ = s => document.querySelector(s)
+const el = (tag, cls, text) => {          // build nodes, never innerHTML: names and
+  const n = document.createElement(tag)   // comments are untrusted input
+  if (cls) n.className = cls
+  if (text != null) n.textContent = text
+  return n
+}
+
+const store = {                            // localStorage throws in private mode
+  get: k => { try { return localStorage.getItem(k) } catch { return null } },
+  set: (k, v) => { try { localStorage.setItem(k, v) } catch {} }
+}
+
+const ago = t => {
+  const s = (Date.now() - new Date(t)) / 1000
+  if (s < 60) return 'just now'
+  if (s < 3600) return Math.floor(s / 60) + 'm ago'
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago'
+  return Math.floor(s / 86400) + 'd ago'
+}
+
+// The score is read out of the cart's own save, so there is no field to type a lie into.
+function readRun(){
+  let run = null, tops = {}
+  try { run = JSON.parse(localStorage.snakeRun || 'null') } catch {}
+  try { tops = JSON.parse(localStorage.snakeTops || '{}') } catch {}
+  const out = []
+  if (run && run.score >= 1) {
+    out.push({label: 'LAST RUN - ' + run.mode, score: run.score, mode: run.mode})
+    if ((tops[run.mode] | 0) > run.score)
+      out.push({label: 'BEST - ' + run.mode, score: tops[run.mode], mode: run.mode})
+  } else {
+    for (const mode of Object.keys(tops))
+      if ((tops[mode] | 0) >= 1) out.push({label: 'BEST - ' + mode, score: tops[mode], mode})
+  }
+  return out.sort((a, b) => b.score - a.score)
+}
+
+const note = (t, bad) => { const m = $('#msg'); m.textContent = t; m.className = bad ? 'note bad' : 'note' }
+
+function fillRuns(){
+  const sel = $('#run'), runs = readRun()
+  sel.textContent = ''
+  if (!runs.length) {
+    $('#send').disabled = true
+    note('Play a round first - your score comes from the game, not from this form.', true)
+    return
+  }
+  for (const r of runs) {
+    const o = el('option', null, r.label + '  -  ' + r.score)
+    o.value = JSON.stringify({score: r.score, mode: r.mode})
+    sel.append(o)
+  }
+}
+
+function drawTop(rows){
+  const ol = $('#top'); ol.textContent = ''
+  if (!rows.length) { ol.append(el('li', 'card note', 'No runs posted yet.')); return }
+  rows.forEach((r, i) => {
+    const row = el('div', 'row')
+    row.append(el('span', 'n', String(i + 1)))
+    row.append(el('span', 'who', r.name))
+    row.append(el('span', 'mode', r.mode))
+    row.append(el('span', 'sc', String(r.score)))
+    const li = el('li', 'card')
+    li.append(row)
+    ol.append(li)
+  })
+}
+
+function drawFeed(rows){
+  const ul = $('#feed'); ul.textContent = ''
+  if (!rows.length) { ul.append(el('li', 'card note', 'No comments yet. Be the first.')); return }
+  for (const r of rows) {
+    const meta = el('div', 'meta')
+    meta.append(el('span', 'who', r.name))
+    meta.append(el('span', 'badge', r.score + ' ' + r.mode))
+    meta.append(el('span', 'when', ago(r.created_at)))
+    const li = el('li', 'card')
+    li.append(meta)
+    if (r.body) li.append(el('p', 'body', r.body))   // a score can go up with no comment
+    ul.append(li)
+  }
+}
+
+async function load(){
+  const get = q => fetch(SB + '/board?approved=eq.true&' + q, {headers: H})
+    .then(r => { if (!r.ok) throw Error('HTTP ' + r.status); return r.json() })
+  try {
+    const [top, feed] = await Promise.all([
+      get('select=name,score,mode&order=score.desc&limit=10'),
+      get('select=name,body,score,mode,created_at&order=created_at.desc&limit=25')])
+    drawTop(top); drawFeed(feed)
+  } catch (err) {
+    const bad = el('li', 'card note bad', 'Could not load the board: ' + err.message)
+    for (const id of ['#top', '#feed']) { const n = $(id); n.textContent = ''; n.append(bad.cloneNode(true)) }
+  }
+}
+
+$('#post').addEventListener('submit', async e => {
+  e.preventDefault()
+  let run
+  try { run = JSON.parse($('#run').value) } catch { return note('Pick a score to attach.', true) }
+  const name = $('#name').value.trim(), body = $('#body').value.trim()
+  if (!name) return note('A name, please.', true)
+  const btn = $('#send'); btn.disabled = true; note('Posting...')
+  try {
+    const res = await fetch(SB + '/board', {
+      method: 'POST',
+      headers: Object.assign({'Content-Type': 'application/json', Prefer: 'return=minimal'}, H),
+      body: JSON.stringify([{name, body: body || null, score: run.score, mode: run.mode}])})
+    if (!res.ok) throw Error('HTTP ' + res.status + ' ' + (await res.text()).slice(0, 120))
+    $('#body').value = ''
+    store.set('boardName', name)                 // so posting after a run is one field shorter
+    note('Posted. It is live on the board.')
+  } catch (err) {
+    note('Could not post: ' + err.message, true)
+  }
+  btn.disabled = false
+})
+
+$('#name').value = store.get('boardName') || ''
+fillRuns(); load()
+window.BOARD = {readRun, ago, load}         // console handle, same idea as window.NES
+})()
+</script>
+</body>
+</html>
