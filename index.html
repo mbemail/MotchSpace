@@ -1,9 +1,16 @@
 <title>SNAKE</title>
 <style>
-  html,body{background:#000;margin:0;height:100%;display:grid;place-items:center}
+  html,body{background:#000;margin:0;height:100%;display:grid;place-items:center;overflow:hidden;
+    touch-action:none;-webkit-user-select:none;user-select:none}
   canvas{width:min(768px,96vw);aspect-ratio:256/240;image-rendering:pixelated}
+  #pad{position:fixed;inset:auto 0 0 0;display:none;justify-content:space-between;padding:.6rem}
+  @media (pointer:coarse){#pad{display:flex}}
+  #pad button{font:700 13px/1 monospace;letter-spacing:.12em;color:#bcbcbc;background:#000;
+    border:2px solid #444;border-radius:6px;padding:.9rem 1.4rem}
+  #pad button:active{background:#222;color:#f8f8f8;border-color:#7c7c7c}
 </style>
 <canvas id=tv width=256 height=240></canvas>
+<div id=pad><button data-b=SELECT>SELECT</button><button data-b=B>B</button></div>
 <script>
 (() => {
 'use strict'
@@ -362,16 +369,39 @@ const KEYS = {ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R',
               Enter:'START', Space:'A', KeyZ:'A', KeyX:'B',
               ShiftLeft:'SELECT', ShiftRight:'SELECT', Tab:'SELECT'}
 const pad = {}, was = {}
-onkeydown = e => {
-  const b = KEYS[e.code]; if (!b) return
-  e.preventDefault()
+function down(b){                                       // every input path ends up here
   if (!AC) { AC = new AudioContext(); if (state === 'TITLE') titleMusic() } else AC.resume()
   pad[b] = 1
   if (b === 'L') pad.R = 0; if (b === 'R') pad.L = 0   // a d-pad cannot press opposites
   if (b === 'U') pad.D = 0; if (b === 'D') pad.U = 0
 }
-onkeyup = e => { const b = KEYS[e.code]; if (b) pad[b] = 0 }
+const up = b => { pad[b] = 0 }
+onkeydown = e => { const b = KEYS[e.code]; if (!b) return; e.preventDefault(); down(b) }
+onkeyup = e => { const b = KEYS[e.code]; if (b) up(b) }
 const hit = b => pad[b] && !was[b]
+
+// Touch: the page is one swipe surface, and SELECT and B get corner buttons because
+// no swipe shape maps onto them. A tap is held for 90ms so the frame clock catches the
+// edge in hit() exactly once, which is all a button press is ever worth.
+const tappers = {}
+function tap(b){
+  down(b); clearTimeout(tappers[b])
+  tappers[b] = setTimeout(() => { up(b); delete tappers[b] }, 90)
+}
+let tx = 0, ty = 0
+document.addEventListener('touchstart', e => {
+  if (e.target.closest('#pad')) return
+  const t = e.changedTouches[0]; tx = t.clientX; ty = t.clientY
+})
+document.addEventListener('touchend', e => {
+  if (e.target.closest('#pad')) return
+  const t = e.changedTouches[0], dx = t.clientX - tx, dy = t.clientY - ty
+  if (Math.abs(dx) < 24 && Math.abs(dy) < 24) tap('START')      // tap confirms, like A
+  else tap(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : (dy > 0 ? 'D' : 'U'))
+})
+document.getElementById('pad').addEventListener('touchstart', e => {
+  const b = e.target.dataset.b; if (b) tap(b)
+})
 
 // ============================================================ Cart settings
 const OPTIONS = [
