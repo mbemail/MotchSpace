@@ -517,7 +517,8 @@ function tick(){
   }
   tickReveal()
   if (state === 'TITLE') setHUD('PLATE ' + PLATES[plate].n + ' - ' + PLATES[plate].cap, 'RORSCHACH - PRESS START OR CLICK')
-  else setHUD((flow ? 'FLOW  ' : '') + caption, 'CLICK-ADD-REMOVE X-NEW Z-COLOR R-FLOW')
+  else setHUD((flow ? 'FLOW  ' : '') + caption,
+    'CLICK-ADD-REMOVE R-FLOW' + ((frame >> 7) & 1 ? ' Z-COLOR' : ' X-NEW'))   // core hints stay, the 5th key alternates
   flushHUD(30)
   syncPad()
   Object.assign(was, pad)
@@ -607,7 +608,7 @@ setHUD('PLATE ' + PLATES[0].n + ' - ' + PLATES[0].cap, 'RORSCHACH - PRESS START 
 if (typeof location !== 'undefined' && location.hash === '#shot') {
   state = 'PLAY'; scheme = 9; loadPlate(7); reveal = 0; rebuildTones(T_FINAL)
   caption = 'PLATE ' + PLATES[7].n + ' - ' + PLATES[7].cap
-  setHUD(caption, 'CLICK-ADD-REMOVE X-NEW Z-COLOR R-FLOW'); flushHUD(64)
+  setHUD(caption, 'CLICK-ADD-REMOVE R-FLOW Z-COLOR'); flushHUD(64)
 }
 requestAnimationFrame(loop)
 })()
