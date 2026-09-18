@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="A fixed-shooter in the Galaga mould: formations, dive runs, and the capture beam.">
+<title>GALACTICA</title>
+<style>
+  html,body{background:#000;margin:0;height:100%;display:grid;place-items:center;gap:1rem;overflow:hidden}
+  canvas{width:min(768px,96vw,78vh);aspect-ratio:256/240;image-rendering:pixelated;image-rendering:crisp-edges}
+  a.board{color:#7C7C7C;text-decoration:none;font:700 13px/1 monospace;letter-spacing:.14em;
+    border:2px solid #7C7C7C;padding:.7rem 1.1rem}
+  a.board:hover,a.board:focus{border-color:#B8F818;color:#B8F818}
+</style>
+</head>
+<body>
+<canvas id="tv" width="256" height="240"></canvas>
+<a class="board" href="scores.html#galactica">SCORES + COMMENTS</a>
+<script src="motor.js"></script>
+<script>
+(() => {
+'use strict'
+// Everything lives in this closure. A top-level let/const in a classic script collides with
+// non-configurable window properties (top, frames, length, name, status, parent, self,
+// origin) and turns the WHOLE script into a SyntaxError that node --check will not catch.
+
+// ======================================================================= PPU: palette
+const MASTER = ('7C7C7C 0000FC 0000BC 4428BC 940084 A80020 A81000 881400 503000 007800 006800 005800 004058 000000 000000 000000 '+
+                'BCBCBC 0078F8 0058F8 6844FC D800CC E40058 F83800 E45C10 AC7C00 00B800 00A800 00A844 008888 000000 000000 000000 '+
+                'F8F8F8 3CBCFC 6888FC 9878F8 F878F8 F85898 F87858 FCA044 F8B800 B8F818 58D854 58F898 00E8D8 787878 000000 000000 '+
+                'FCFCFC A4E4FC B8B8F8 D8B8F8 F8B8F8 F8A4C0 F0D0B0 FCE0A8 F8D878 D8F878 B8F8B8 B8F8D8 00FCFC F8D8F8 000000 000000').split(' ')
+const RGB = MASTER.map(h => { const n = parseInt(h, 16)
+  return (0xff << 24 | (n & 255) << 16 | (n >> 8 & 255) << 8 | (n >> 16 & 255)) >>> 0 })
+
+const BACKDROP = 0x0F                           // $3F00: deep space is the backdrop here
+const BGPAL  = [[BACKDROP,0x30,0x10,0x2C],     // 0 HUD text: white, grey, cyan accent
+                [BACKDROP,0x01,0x10,0x30],     // 1 starfield: blue haze, grey star, white star
+                [BACKDROP,0x03,0x13,0x24],     // 2 nebula: dark, mid and lit purple
+                [BACKDROP,0x00,0x10,0x30]]     // 3 spare rock: shadow, grey, lit edge
+// Four sub-palettes is the hardware limit, so effects share the player's and the butterflies
+// share the enemy fire's. A captured fighter is the same CHR drawn on the butterfly palette,
+// which is exactly how the cabinet sold "your ship, turned against you".
+const SPRPAL = [[BACKDROP,0x0F,0x2C,0x30],     // 0 player + muzzle/puff: keyline, cyan, white
+                [BACKDROP,0x0F,0x11,0x28],     // 1 bee (Zako): keyline, blue, gold
+                [BACKDROP,0x0F,0x16,0x30],     // 2 butterfly (Goei), enemy fire, captive ship
+                [BACKDROP,0x0F,0x19,0x13]]     // 3 boss Galaga: keyline, green, violet
+
+// The tractor beam. The PPU cannot punch a hole in the nametable, so the rasterizer composites
+// it: a cone in master-palette blues, banded and shimmering, exactly the cabinet's colours.
+const BEAMPAL = [0x01, 0x11, 0x21, 0x30]       // outer blue, blue, light blue, white core
+
+// ======================================================================= CHR ROM
+const T = s => s.trim().split('\n').map(r => r.trim())
+const quarters = a => [[0,0],[8,0],[0,8],[8,8]].map(([x,y]) => a.slice(y, y+8).map(r => r.slice(x, x+8)))
+const pack = (name, rows) => {
+  const flat = rows.join('')
+  if (rows.length !== 8 || !/^[0-3]{64}$/.test(flat)) throw Error('CHR ' + name + ' is not 8x8 of digits 0-3')
+  return Uint8Array.from(flat, c => +c)
+}
+const bgChr = [], bgId = {}, sprChr = [], sprId = {}
+const addBG  = (n, t) => (bgId[n]  = bgChr.push(pack(n, t)) - 1)
+const addSPR = (n, t) => (sprId[n] = sprChr.push(pack(n, t)) - 1)
+const addBG16  = (n, a) => quarters(a).forEach((t, i) => addBG(n + i, t))
+const addSPR16 = (n, a) => quarters(a).forEach((t, i) => addSPR(n + i, t))
+const four = (tbl, n) => [tbl[n+0], tbl[n+1], tbl[n+2], tbl[n+3]]
+
+addBG('BLANK', T('00000000\n'.repeat(8)))
+
+// Star and nebula cells are generated once from a seeded LCG, so the field is fixed at load
+// and self-testable rather than redrawn per frame.
+const lcg = seed => { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296) }
+const starPattern = (count, seed) => {
+  const r = lcg(seed), g = Array.from({length: 16}, () => Array(16).fill('0'))
+  for (let i = 0; i < count; i++) {
+    const x = (r() * 16) | 0, y = (r() * 16) | 0, t = r()
+    g[y][x] = t < 0.5 ? '3' : t < 0.8 ? '2' : '1'   // mostly white, some grey, a few blue
+  }
+  return g.map(row => row.join(''))
+}
+const nebPattern = seed => {
+  const r = lcg(seed), cx = 5 + r() * 6, cy = 5 + r() * 6
+  const g = Array.from({length: 16}, () => Array(16).fill('0'))
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const v = 1 - Math.hypot(x - cx, y - cy) / 9 + (r() - 0.5) * 0.7
+    g[y][x] = v > 0.72 ? '3' : v > 0.45 ? '2' : v > 0.2 ? '1' : '0'
+  }
+  return g.map(row => row.join(''))
+}
+addBG16('SPACE0', starPattern(14, 0x1234))
+addBG16('SPACE1', starPattern(26, 0x5678))
+addBG16('NEB0', nebPattern(0x9ABC))
+addBG16('NEB1', nebPattern(0xDEF0))
+
+// Parallax. The PPU cannot put two nametables in one playfield, so on hardware a distant layer
+// would be a second star pattern in the same table scrolled by a mid-frame split. This is a
+// software rasterizer, so it gets a real far layer: one sparse buffer at a third of the scroll
+// rate, drawn only where the near field leaves the backdrop showing. Dimmer colours than the
+// near stars sell the distance.
+const FAR_H = 416
+const FARPAL = [BACKDROP, 0x02, 0x01, 0x10]
+const FAR = new Uint8Array(256 * FAR_H)
+{ const r = lcg(0xBEEF)
+  for (let i = 0; i < 190; i++) {
+    const x = (r() * 256) | 0, y = (r() * FAR_H) | 0, t = r()
+    FAR[y*256 + x] = t < 0.6 ? 1 : t < 0.9 ? 2 : 3
+  } }
+
+// 5x7 glyphs padded into 8x8 background tiles. Text is nametable tiles on the hardware.
+const FONT = {
+  A:'01110 10001 10001 11111 10001 10001 10001', B:'11110 10001 11110 10001 10001 10001 11110',
+  C:'01110 10001 10000 10000 10000 10001 01110', D:'11100 10010 10001 10001 10001 10010 11100',
+  E:'11111 10000 10000 11110 10000 10000 11111', F:'11111 10000 10000 11110 10000 10000 10000',
+  G:'01110 10001 10000 10111 10001 10001 01111', H:'10001 10001 10001 11111 10001 10001 10001',
+  I:'01110 00100 00100 00100 00100 00100 01110', J:'00111 00010 00010 00010 00010 10010 01100',
+  K:'10001 10010 10100 11000 10100 10010 10001', L:'10000 10000 10000 10000 10000 10000 11111',
+  M:'10001 11011 10101 10101 10001 10001 10001', N:'10001 11001 10101 10011 10001 10001 10001',
+  O:'01110 10001 10001 10001 10001 10001 01110', P:'11110 10001 10001 11110 10000 10000 10000',
+  Q:'01110 10001 10001 10001 10101 10010 01101', R:'11110 10001 10001 11110 10100 10010 10001',
+  S:'01111 10000 10000 01110 00001 00001 11110', T:'11111 00100 00100 00100 00100 00100 00100',
+  U:'10001 10001 10001 10001 10001 10001 01110', V:'10001 10001 10001 10001 10001 01010 00100',
+  W:'10001 10001 10001 10101 10101 10101 01010', X:'10001 10001 01010 00100 01010 10001 10001',
+  Y:'10001 10001 01010 00100 00100 00100 00100', Z:'11111 00001 00010 00100 01000 10000 11111',
+  0:'01110 10001 10011 10101 11001 10001 01110', 1:'00100 01100 00100 00100 00100 00100 01110',
+  2:'01110 10001 00001 00110 01000 10000 11111', 3:'11111 00010 00100 00010 00001 10001 01110',
+  4:'00010 00110 01010 10010 11111 00010 00010', 5:'11111 10000 11110 00001 00001 10001 01110',
+  6:'00110 01000 10000 11110 10001 10001 01110', 7:'11111 00001 00010 00100 01000 01000 01000',
+  8:'01110 10001 10001 01110 10001 10001 01110', 9:'01110 10001 10001 01111 00001 00010 01100',
+  '-':'00000 00000 00000 01110 00000 00000 00000', '.':'00000 00000 00000 00000 00000 01100 01100',
+  '!':'00100 00100 00100 00100 00100 00000 00100', '=':'00000 00000 11111 00000 11111 00000 00000',
+  '>':'10000 01000 00100 00010 00100 01000 10000', '/':'00001 00010 00010 00100 01000 01000 10000',
+  ':':'00000 01100 01100 00000 01100 01100 00000'}
+for (const [ch, g] of Object.entries(FONT)) {
+  const rows = g.split(' ').map(r => '0' + r + '00')
+  while (rows.length < 8) rows.push('00000000')
+  addBG('F' + ch, rows)
+}
+
+// Sprites. Keyline 1, body 2, highlight 3. Sprites flip free, so mirrored figures reuse tiles.
+const SHIP = T(`
+  0000000110000000
+  0000001331000000
+  0000013333100000
+  0000133333310000
+  0001333333331000
+  0013333333333100
+  0133333333333310
+  1333222222222331
+  1332222222222331
+  1322222222222231
+  1222222222222221
+  1222122222212221
+  1221122222211221
+  1111000000001111
+  0000000000000000
+  0000000000000000`)
+const shear = (a, k) => a.map((row, y) => {          // banking, not a facing flip: the ship is symmetric
+  const s = Math.round(k * (15 - y) / 15)
+  return s > 0 ? '0'.repeat(s) + row.slice(0, 16 - s) : s < 0 ? row.slice(-s) + '0'.repeat(-s) : row
+})
+addSPR16('SHIP', SHIP); addSPR16('SHIP_L', shear(SHIP, -2)); addSPR16('SHIP_R', shear(SHIP, 2))
+// Your shot and theirs are the same digits on different palettes: cyan-white for yours, red-white
+// for the enemy's, so "which of these is mine" is never a question.
+addSPR('PBULL', T('00000000\n00022000\n00233200\n00233200\n00233200\n00233200\n00022000\n00000000'))
+addSPR('EBULL', T('00000000\n00022000\n00233200\n02333320\n02333320\n00233200\n00022000\n00000000'))
+addSPR('POWER', T('00111100\n01222210\n12233221\n12333321\n12333321\n12233221\n01222210\n00111100'))
+// A bomb is a sphere with a fuse, on the boss palette so it never reads as a power-up.
+addSPR('BOMB', T('00001100\n00001000\n00111100\n01222210\n12233221\n12222221\n12222221\n01222210'))
+addSPR('FLAME0', T('00011000\n00133100\n00133100\n01333310\n00133100\n00011000\n00000000\n00000000'))
+addSPR('FLAME1', T('00000000\n00011000\n00133100\n01333310\n01333310\n00133100\n00011000\n00000000'))
+addSPR('MUZZLE', T('00000000\n00000000\n00133100\n00133100\n00133100\n00011000\n00000000\n00000000'))
+addSPR('PUFF0', T('00000000\n00022000\n00233200\n02333320\n02333320\n00233200\n00022000\n00000000'))
+addSPR('PUFF1', T('20000002\n02000020\n00200200\n00000000\n00000000\n00200200\n02000020\n20000002'))
+
+// The formation. Every enemy is a mirrored figure or a flapped pair, so the CHR cost stays near
+// four tiles each. Keyline 1, body 2, wing 3 - the palette decides the species.
+const BEE = T(`
+  0000000000000000
+  0000100000010000
+  0001300000031000
+  0013300000033100
+  0133330000333310
+  1333222222223331
+  1333222222222331
+  0132222222222310
+  0012222222222100
+  0001222222221000
+  0000122222210000
+  0000012222100000
+  0000001221000000
+  0000000110000000
+  0000000000000000
+  0000000000000000`)
+const BEE2 = T(`
+  0000000000000000
+  0000000000000000
+  0000100000010000
+  0001300000031000
+  0013300000033100
+  0133302222203331
+  1333222222223331
+  1333222222222331
+  0132222222222310
+  0012222222222100
+  0001222222221000
+  0000122222210000
+  0000012222100000
+  0000001221000000
+  0000000110000000
+  0000000000000000`)
+const BFLY = T(`
+  0000000000000000
+  0000000000000000
+  0011000000001100
+  0133100000013310
+  1333310000133331
+  1333332222333331
+  1333322222223331
+  0133222222222310
+  0012222222222100
+  0001222222221000
+  0000122222210000
+  0000013222100000
+  0000001331000000
+  0000000110000000
+  0000000000000000
+  0000000000000000`)
+const BFLY2 = T(`
+  0000000000000000
+  0000000000000000
+  0000000000000000
+  0011000000001100
+  0133100000013310
+  1333310000133331
+  1333332222333331
+  1333322222223331
+  0132222222222310
+  0012222222222100
+  0001222222221000
+  0000013222100000
+  0000001221000000
+  0000000110000000
+  0000000000000000
+  0000000000000000`)
+addSPR16('BEE', BEE);    addSPR16('BEE2', BEE2)
+addSPR16('BFLY', BFLY);  addSPR16('BFLY2', BFLY2)
+
+// Boss Galaga. It stays 16x16 like the rest, because sixty-four OAM entries do not stretch to a
+// 32x32 figure plus a formation; the violet wings and the capture beam are what make it read.
+const BOSG = T(`
+  0000000000000000
+  0001000000001000
+  0012200000022100
+  0122220000222210
+  1222333333332221
+  1233333333333321
+  1223333333333221
+  0122333333332210
+  0012233333322100
+  0001223333221000
+  0000122222210000
+  0000012222100000
+  0000001221000000
+  0000000110000000
+  0000000000000000
+  0000000000000000`)
+addSPR16('BOSG', BOSG)
+
+// ======================================================================= Metatiles and world
+const META = {}
+const meta = (ch, tiles, pal, solid) => (META[ch] = {tiles, pal, solid})
+meta('.', [0,0,0,0].map(() => bgId.BLANK), 0, false)
+meta('s', four(bgId, 'SPACE0'), 1, false)
+meta('S', four(bgId, 'SPACE1'), 1, false)
+meta('n', four(bgId, 'NEB0'),   2, false)
+meta('N', four(bgId, 'NEB1'),   2, false)
+
+// A tall, procedurally generated star field. Nothing is solid: a shmup collides with sprites.
+const WW = 32, WH = 64, WT = WW * 2
+const hash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0
+  h = ((h ^ (h >>> 13)) * 1274126177) | 0
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296 }
+const WORLD = []
+for (let y = 0; y < WH; y++) {
+  let row = ''
+  for (let x = 0; x < WW; x++) {
+    const r = hash(x, y)
+    // Galaga's field is mostly black. Stars yes, nebula only rarely, or the formation has to
+    // fight the background for attention.
+    row += r < 0.015 ? 'n' : r < 0.03 ? 'N' : r < 0.20 ? 'S' : r < 0.46 ? 's' : '.'
+  }
+  WORLD.push(row)
+}
+const worldTiles = new Uint8Array(WT * WH * 2)
+const worldAttr = new Uint8Array(WW * WH)
+function paintWorld(){
+  for (let my = 0; my < WH; my++) for (let mx = 0; mx < WW; mx++) {
+    const m = META[WORLD[my][mx]]
+    worldAttr[my*WW + mx] = m.pal
+    m.tiles.forEach((id, i) => worldTiles[(my*2 + (i >> 1)) * WT + mx*2 + (i & 1)] = id)
+  }
+}
+
+// ======================================================================= Status bar
+const BAR = 4                                   // tile rows; two attribute rows exactly
+const barTiles = new Uint8Array(32 * BAR).fill(bgId.BLANK)
+const hudTarget = new Uint8Array(32 * BAR)
+const hudDirty = new Uint8Array(32 * BAR)
+let vramWrites = 0
+function text(x, y, s){
+  for (let i = 0; i < s.length; i++) {
+    const id = s[i] === ' ' ? bgId.BLANK : (bgId['F' + s[i]] ?? bgId.BLANK)
+    const k = y*32 + x + i
+    if (hudTarget[k] !== id) { hudTarget[k] = id; hudDirty[k] = 1 }
+  }
+}
+// A state swap can demand a whole new HUD at once. Real carts feed nametable bytes into vblank
+// over several frames, so flush at most HUD_MAX per frame and let the rest wait until the next.
+const HUD_MAX = 24
+function flushHud(){
+  vramWrites = 0
+  for (let k = 0; k < hudDirty.length; k++) {
+    if (!hudDirty[k]) continue
+    hudDirty[k] = 0
+    if (barTiles[k] === hudTarget[k]) continue
+    barTiles[k] = hudTarget[k]; vramWrites++
+    if (vramWrites >= HUD_MAX) break
+  }
+}
+
+// ======================================================================= Raster
+const ctx = document.getElementById('tv').getContext('2d')
+const img = ctx.createImageData(256, 240)
+const buf = new Uint32Array(img.data.buffer)
+const bgIdx = new Uint8Array(256 * 240)
+const scan = new Uint8Array(240)
+const OAM = []
+let oamRotate = 0, scrollX = 0, scrollY = 0, farScroll = 0
+let flash = 0, shake = 0, beam = null
+
+// Vertical whole-screen jitter, done as a buffer memmove so the status bar shakes with the field.
+function shiftBuf(d){
+  const m = d < 0 ? -d : d
+  if (d > 0) {
+    for (let y = 239; y >= m; y--) buf.copyWithin(y*256, (y-m)*256, (y-m+1)*256)
+    buf.fill(RGB[BACKDROP], 0, m*256)
+  } else {
+    for (let y = 0; y < 240 - m; y++) buf.copyWithin(y*256, (y+m)*256, (y+m+1)*256)
+    buf.fill(RGB[BACKDROP], (240-m)*256, 240*256)
+  }
+}
+
+function render(){
+  for (let ty = 0; ty < BAR; ty++) for (let tx = 0; tx < 32; tx++) {
+    const tile = bgChr[barTiles[ty*32 + tx]], pal = BGPAL[0]
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const c = tile[y*8 + x], o = (ty*8 + y) * 256 + tx*8 + x
+      bgIdx[o] = c; buf[o] = RGB[c ? pal[c] : BACKDROP]
+    }
+  }
+  const outerCol = (frame >> 2) & 1 ? BEAMPAL[0] : BEAMPAL[1]     // the cone shimmers as it holds
+  for (let py = BAR*8; py < 240; py++) {
+    const wy = py - BAR*8 + scrollY, fb = ((py - BAR*8 + farScroll) % FAR_H) * 256
+    // The tractor beam widens downward from the boss, so its half-width is one line of maths per
+    // scanline rather than one per pixel.
+    let bh = 0, bcx = 0
+    if (beam && py >= beam.y0 && py <= beam.y1) {
+      bh = beam.w * (py - beam.y0) / (beam.y1 - beam.y0)
+      bcx = beam.x
+    }
+    for (let px = 0; px < 256; px++) {
+      const wx = px + scrollX, o = py*256 + px
+      const c = bgChr[worldTiles[(wy >> 3) * WT + (wx >> 3)]][(wy & 7) * 8 + (wx & 7)]
+      bgIdx[o] = c
+      if (c) buf[o] = RGB[BGPAL[worldAttr[(wy >> 4) * WW + (wx >> 4)]][c]]
+      else { const f = FAR[fb + px]; buf[o] = f ? RGB[FARPAL[f]] : RGB[BACKDROP] }
+      if (bh > 0) {
+        const d = Math.abs(px + 0.5 - bcx) / bh
+        if (d < 1) buf[o] = RGB[d < 0.3 ? BEAMPAL[3] : d < 0.6 ? BEAMPAL[2] : d < 0.85 ? BEAMPAL[1] : outerCol]
+      }
+    }
+  }
+  scan.fill(0)
+  const n = OAM.length
+  for (let i = 0; i < n; i++) {
+    const s = OAM[(i + oamRotate) % n], tile = sprChr[s.tile], pal = SPRPAL[s.pal]
+    for (let y = 0; y < 8; y++) {
+      const sy = s.y + y
+      if (sy < 0 || sy >= 240 || scan[sy] >= 8) continue
+      scan[sy]++
+      for (let x = 0; x < 8; x++) {
+        const sx = s.x + x
+        if (sx < 0 || sx >= 256) continue
+        const c = tile[(s.fv ? 7 - y : y) * 8 + (s.fh ? 7 - x : x)], o = sy*256 + sx
+        if (!c || (s.behind && bgIdx[o])) continue
+        buf[o] = RGB[pal[c]]
+      }
+    }
+  }
+  // A dithered flash, not a whiteout: half the pixels, so it reads as an impact and you can still
+  // see the board you were in the middle of.
+  if (flash > 0) {
+    const w = RGB[0x30]
+    for (let y = 0; y < 240; y++) for (let x = y & 1; x < 256; x += 2) buf[y*256 + x] = w
+  } else if (shake > 0) shiftBuf((frame & 2) ? 3 : -3)
+  if (n > 8) oamRotate++
+  ctx.putImageData(img, 0, 0)
+}
+const sprite = (x, y, tile, pal, fh = false, fv = false, behind = false) => {
+  if (OAM.length < 64) OAM.push({x, y, tile, pal, fh, fv, behind})
+}
+function meta16(x, y, name, pal, fh = false, behind = false, fv = false){
+  const [a, b, c, e] = four(sprId, name)
+  const tl = fv ? (fh ? e : c) : (fh ? b : a), tr = fv ? (fh ? c : e) : (fh ? a : b)
+  const bl = fv ? (fh ? b : a) : (fh ? e : c), br = fv ? (fh ? a : b) : (fh ? c : e)
+  sprite(x,   y,   tl, pal, fh, fv, behind); sprite(x+8, y,   tr, pal, fh, fv, behind)
+  sprite(x,   y+8, bl, pal, fh, fv, behind); sprite(x+8, y+8, br, pal, fh, fv, behind)
+}
+const meta32 = (x, y, names, pal, behind = false) => names.forEach((n, i) =>
+  meta16(x + (i & 1) * 16, y + (i >> 1) * 16, n, pal, false, behind, false))
+
+// ======================================================================= APU
+const CPU = 1789773, FPS = 60.0988, WAVE_SR = 44100, STEP = 32
+const NOISE_PERIODS = [4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068]
+const DUTY = [[0,1,0,0,0,0,0,0],[0,1,1,0,0,0,0,0],[0,1,1,1,1,0,0,0],[1,0,0,1,1,1,1,1]]
+const TRI_SEQ = [15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+const COEF = {p1: 0.00752, p2: 0.00752, tri: 0.00851, noise: 0.00494}
+const MASTER_GAIN = 1
+let ac = null, master, gate, pulseBuf, triBuf, noiseBuf
+const pulseHz = f => { const p = Math.round(CPU / (16 * f)) - 1; return p < 8 || p > 0x7FF ? 0 : CPU / (16 * (p + 1)) }
+const triHz   = f => { const p = Math.round(CPU / (32 * f)) - 1; return p < 2 || p > 0x7FE ? 0 : CPU / (32 * (p + 1)) }
+const SEMI = {C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11}
+
+function audioUnlock(){
+  if (ac) { ac.resume(); return }
+  ac = new AudioContext()
+  master = ac.createGain(); master.gain.value = MASTER_GAIN; master.connect(ac.destination)
+  gate = {}
+  for (const ch of ['p1','p2','tri','noise']) { gate[ch] = ac.createGain(); gate[ch].connect(master) }
+  const cycle = (seq, max) => {
+    const b = ac.createBuffer(1, seq.length * STEP, WAVE_SR), dd = b.getChannelData(0)
+    for (let i = 0; i < dd.length; i++) dd[i] = seq[(i / STEP) | 0] / max - 0.5
+    return b
+  }
+  pulseBuf = DUTY.map(s => cycle(s, 1))
+  triBuf = cycle(TRI_SEQ, 15)
+  noiseBuf = [0, 1].map(mode => {
+    const out = []; let s = 1
+    do { out.push(s & 1 ? -0.5 : 0.5); const fb = (s ^ (s >> (mode ? 6 : 1))) & 1; s = (s >> 1) | (fb << 14) }
+    while (s !== 1 && out.length < 32767)
+    const b = ac.createBuffer(1, out.length, WAVE_SR); b.getChannelData(0).set(out); return b
+  })
+  startMusic()
+}
+const rateOf = (ch, hz) => ch === 'noise' ? hz / WAVE_SR : hz * (ch === 'tri' ? 32 : 8) * STEP / WAVE_SR
+const bufOf = (ch, duty, mode) => ch === 'tri' ? triBuf : ch === 'noise' ? noiseBuf[mode ? 1 : 0] : pulseBuf[duty]
+
+// ======================================================================= Music driver
+// Tracker model, as the template: fixed ROWS patterns, one pattern per channel per order row, plus
+// a whole-semitone transpose. Two tracks. The stage theme is A minor (i - VI - III - VII) and runs
+// 77 s from the loop point; the boss theme is A phrygian (i - bII - i - V), faster rows, driving
+// octave bass, and runs 35 s. Both clear the floors in their track record at load.
+const ROWS = 32
+const INST = {p1: {duty: 2, vol: 10, decay: 5, floor: 4, vib: {delay: 12, depth: 25, speed: 8}},
+              p2: {duty: 1, vol: 6,  decay: 6, floor: 3},
+              tri: {},
+              noise: {vol: 6, decay: 2, floor: 0}}
+const CH = ['p1','p2','tri','noise']
+const tokens = s => s.split(/\s+/).filter(t => t && t !== '|')
+const delayTrack = (s, n) => { const t = tokens(s); return ['-', ...Array(n - 1).fill('.'), ...t.slice(0, t.length - n)].join(' ') }
+const rest = Array.from({length: ROWS}, (_, i) => i ? '.' : '-').join(' ')
+const parseNote = tok => {
+  const m = /^([A-G]#?)(\d)(?:\^([0-9A-F])([0-9A-F]))?$/.exec(tok)
+  return m && {hz: 440 * 2 ** ((SEMI[m[1]] + (+m[2] + 1) * 12 - 69) / 12),
+               arp: m[3] ? [0, parseInt(m[3], 16), parseInt(m[4], 16)] : null}
+}
+// Stage theme. A is the question, A2 the answer that lands on the octave.
+const S_A  = 'A4 . C5 . E5 . . . | D5 . C5 . B4 . . . | C5 . E5 . G5 . . . | F5 . E5 . D5 . . .'
+const S_A2 = 'A4 . C5 . E5 . G5 . | F5 . E5 . D5 . C5 . | B4 . D5 . G5 . . . | A5 . . . - . . .'
+const S_A3 = 'A5 . G5 . E5 . C5 . | D5 . E5 . F5 . D5 . | C5 . B4 . A4 . . . | A4 . . . - . . .'
+const S_B  = 'C5 . . . E5 . . . | G5 . . . E5 . . . | F5 . . . A5 . . . | G5 . . . . . . .'
+const S_B2 = 'C5 . . . E5 . G5 . | A5 . . . G5 . E5 . | D5 . . . F5 . A5 . | G5 . E5 . C5 . . .'
+const S_C  = 'A4 . B4 . C5 . D5 . | E5 . F5 . G5 . A5 . | B5 . A5 . G5 . F5 . | E5 . D5 . C5 . B4 .'
+const S_T  = 'A4 . C5 . E5 . G5 . | F5 . E5 . C5 . A4 . | B4 . D5 . F5 . G5 . | A5 . G5 . E5 . C5 .'
+// Boss theme. Phrygian, so the bII stab lands a semitone above home.
+const Z_R1 = 'A4 . C5 . E5 . C5 . | A4 . . . E4 . . . | F4 . E4 . D4 . C4 . | B3 . . . E4 . . .'
+const Z_R2 = 'A5 . G5 . E5 . C5 . | D5 . E5 . F5 . E5 . | D5 . C5 . B4 . C5 . | A4 . . . - . . .'
+const Z_ST = 'A4^37 . . . A4^37 . . . | A#4^47 . . . A#4^47 . . . | A4^37 . . . A4^37 . . . | E4^47 . . . E4^47 . . .'
+const Z_RU = 'A4 . A#4 . C5 . D5 . | E5 . F5 . G5 . A5 . | A#5 . A5 . G5 . F5 . | E5 . D5 . C5 . A#4 .'
+const Z_CL = 'A4 . E5 . A5 . E5 . | A#4 . F5 . A#5 . F5 . | A4 . E5 . A5 . G5 . | F5 . E5 . D5 . C5 .'
+const Z_HD = 'A4 . . . C5 . B4 . | A4 . . . E4 . . . | F4 . E4 . D4 . E4 . | A4 . . . - . . .'
+const Z_ARP  = 'A3^37 . . . . . . . | A#3^47 . . . . . . . | A3^37 . . . . . . . | E3^47 . . . . . . .'
+const Z_ARP2 = 'A3^37 . A4^37 . A3^37 . A4^37 . | A#3^47 . A#4^47 . A#3^47 . A#4^47 . | A3^37 . A4^37 . A3^37 . A4^37 . | E3^47 . E4^47 . E3^47 . E4^47 .'
+const Z_CNT  = 'E5 . . . C5 . . . | D5 . . . A#4 . . . | C5 . . . A4 . . . | B4 . . . E5 . . .'
+const Z_DRV  = 'A2 . A3 . A2 . A3 . | A#2 . A#3 . A#2 . A#3 . | A2 . A3 . A2 . A3 . | E2 . E3 . E2 . E3 .'
+const Z_ROL  = 'A2 . E3 . A3 . E3 . | A#2 . F3 . A#3 . F3 . | A2 . E3 . A3 . E3 . | E2 . B2 . E3 . B2 .'
+const Z_PDL  = 'A1 . . . . . . . | A#1 . . . . . . . | A1 . . . . . . . | E1 . . . . . . .'
+const Z_NDR  = 'C 2 C 2 Fs 2 C 2 | C 2 C 2 Fs 2 C 2 | C 2 C 2 Fs 2 C 2 | C 2 C 2 Fs 2 2 2'
+const Z_NHF  = 'C . . . 2 . . . | Fs . . . 2 . . . | C . . . 2 . . . | Fs . 2 . C . . .'
+const Z_NFL  = 'C . C . 2 2 2 2 | Fs . Fs . 2 2 2 2 | C 2 C 2 C 2 C 2 | Fs . 2 2 Fs 2 C -'
+
+// [pulse 1, pulse 2, triangle, noise, transpose]. A row is 4 bars, so the order list is the form:
+// intro, A A' B A C A'' B' A A' C B' A'' C' A A' A'' turnaround, then the final A up a whole step.
+const TRACKS = {
+  stage: {speed: 8, loop: 1, minLoop: 60, pat: {
+    p1: {intro: 'A4^37 . . . C5^47 . . . | E4^37 . . . A4^37 . . . | F4^47 . . . A4^37 . . . | C5^47 . . . E5^37 . . .',
+         a: S_A, a2: S_A2, a3: S_A3, b: S_B, b2: S_B2, c: S_C, turn: S_T},
+    p2: {rest,
+         harm:  'E4 . . . . . . . | F4 . . . . . . . | E4 . . . . . . . | D4 . . . . . . .',
+         echo:  delayTrack(S_A, 2), echo2: delayTrack(S_A3, 2),
+         arp:   'A3^37 . . . . . . . | F3^47 . . . . . . . | C4^47 . . . . . . . | G3^47 . . . . . . .',
+         counter:'E4 . G4 . . . E4 . | C5 . . . G4 . . . | A4 . C5 . . . A4 . | G4 . . . . . . .'},
+    tri: {pedal: 'A2 . . . . . . . | F2 . . . . . . . | C3 . . . . . . . | G2 . . . . . . .',
+          walk:  'A2 . . . E3 . . . | F2 . . . C3 . . . | C3 . . . G3 . . . | G2 . . . D3 . . .',
+          walkB: 'A2 . . . A2 . . . | F2 . . . F2 . . . | C3 . . . C3 . . . | G2 . . . G2 . . .',
+          walkC: 'A2 . E2 . A2 . E2 . | F2 . C2 . F2 . C2 . | C3 . G2 . C3 . G2 . | G2 . D2 . G2 . D2 .',
+          turn:  'A2 . C3 . E3 . G3 . | F2 . A2 . C3 . E3 . | B2 . D3 . F3 . A3 . | A2 . E3 . A2 . E3 .'},
+    noise: {rest,
+            beat:  'C 2 8 2 C 2 8 2 | C 2 8 2 C 2 8 2 | C 2 8 2 C 2 8 2 | C 2 8 2 C 2 8 8',
+            beatB: 'C . 2 2 Fs . 2 2 | C . 2 2 Fs . 2 2 | C . 2 2 Fs . 2 2 | C . 2 2 Fs 2 2 2',
+            fill:  'C . C . C . C . | 2 2 2 2 2 2 2 2 | Fs . Fs . Fs . 2 2 | C 8 2 8 Fs 2 C -'}},
+    order: [
+      ['intro','rest',   'pedal','rest', 0],
+      ['a',    'harm',   'walk', 'beat', 0],
+      ['a2',   'echo',   'walk', 'beat', 0],
+      ['b',    'arp',    'walkB','beatB',0],
+      ['a',    'arp',    'walk', 'beatB',0],
+      ['c',    'counter','walkC','beatB',0],
+      ['a3',   'echo2',  'walkC','fill', 0],
+      ['b2',   'arp',    'walkB','beatB',0],
+      ['a',    'harm',   'walk', 'beat', 0],
+      ['a2',   'echo',   'walkB','beat', 0],
+      ['c',    'counter','walkC','beatB',0],
+      ['b2',   'arp',    'walkB','beatB',0],
+      ['a3',   'echo2',  'walkC','beatB',0],
+      ['c',    'counter','walkC','fill', 0],
+      ['a',    'arp',    'walk', 'beat', 0],
+      ['a2',   'echo',   'walkB','beatB',0],
+      ['a3',   'harm',   'walk', 'beat', 0],
+      ['turn', 'echo',   'turn', 'fill', 0],
+      ['a',    'arp',    'walk', 'beat', 2]]},
+  boss: {speed: 6, loop: 1, minLoop: 30, pat: {
+    p1: {head: Z_HD, riff1: Z_R1, riff2: Z_R2, stab: Z_ST, run: Z_RU, climb: Z_CL},
+    p2: {rest, arp: Z_ARP, arp2: Z_ARP2, counter: Z_CNT, echo: delayTrack(Z_R1, 2)},
+    tri: {drive: Z_DRV, roll: Z_ROL, pedalL: Z_PDL},
+    noise: {rest, drive: Z_NDR, half: Z_NHF, fill: Z_NFL}},
+    order: [
+      ['head', 'rest',  'pedalL','rest', 0],
+      ['riff1','arp',   'drive', 'half', 0],
+      ['stab', 'arp2',  'drive', 'drive',0],
+      ['riff2','counter','roll', 'drive',0],
+      ['riff1','arp',   'drive', 'drive',0],
+      ['run',  'arp2',  'roll',  'fill', 0],
+      ['stab', 'counter','drive','drive',0],
+      ['climb','arp',   'drive', 'drive',0],
+      ['riff2','arp2',  'roll',  'fill', 0],
+      ['run',  'counter','drive','drive',0],
+      ['stab', 'arp',   'roll',  'drive',0],
+      ['head', 'arp2',  'pedalL','half', 0]]}
+}
+const EV = {}
+for (const [tn, S] of Object.entries(TRACKS)) {
+  EV[tn] = {}
+  for (const ch of CH) {
+    EV[tn][ch] = {}
+    for (const [name, s] of Object.entries(S.pat[ch])) {
+      const byRow = []; let cur = null
+      tokens(s).forEach((t, row) => {
+        if (t === '.') { if (cur) cur.len++; return }
+        cur = t === '-' ? null : {t, len: 1}
+        if (cur) byRow[row] = cur
+      })
+      EV[tn][ch][name] = byRow
+    }
+  }
+}
+const mus = {track: 'stage', pos: 0, row: 0, t: 0, on: false, saved: {}}
+// An explicit restart, from the top: the title, a fresh game, a run that ended.
+function startMusic(track){
+  mus.track = track || mus.track || 'stage'
+  mus.saved = {}
+  mus.pos = 0; mus.row = 0
+  if (!ac) return
+  mus.t = ac.currentTime + 0.05; mus.on = true
+}
+// A swap that keeps every track's playhead, so the stage theme picks up where it left off instead
+// of starting over at the top of every stage and every time a capture beam closes.
+function swapMusic(track){
+  if (mus.track === track) return
+  mus.saved[mus.track] = {pos: mus.pos, row: mus.row}
+  mus.track = track
+  const s = mus.saved[track] || {pos: 0, row: 0}
+  mus.pos = s.pos; mus.row = s.row
+}
+
+function voice(ch, t, dur, hz, inst, route, arp){
+  const quant = ch === 'tri' ? triHz : ch === 'noise' ? (h => h) : pulseHz
+  if (!quant(hz)) return
+  const fs = 1 / FPS, c = COEF[ch], vib = inst.vib
+  const src = ac.createBufferSource(), g = ac.createGain()
+  src.buffer = bufOf(ch, inst.duty, inst.mode); src.loop = true
+  const frames = arp || vib ? Math.max(1, Math.ceil(dur * FPS)) : 1
+  for (let k = 0; k < frames; k++) {
+    let f = hz * 2 ** ((arp ? arp[k % 3] : 0) / 12)
+    if (vib && k >= vib.delay) f *= 2 ** (vib.depth / 1200 * Math.sin(2 * Math.PI * (k - vib.delay) / vib.speed))
+    src.playbackRate.setValueAtTime(rateOf(ch, quant(f) || quant(hz)), t + k * fs)
+  }
+  if (ch === 'tri') g.gain.setValueAtTime(15 * c, t)
+  else {
+    let v = inst.vol
+    g.gain.setValueAtTime(v * c, t)
+    if (inst.decay) for (let k = inst.decay; k * fs < dur && v > inst.floor; k += inst.decay)
+      g.gain.setValueAtTime(--v * c, t + k * fs)
+  }
+  g.gain.setValueAtTime(0, t + dur)
+  src.connect(g).connect(route)
+  src.start(t); src.stop(t + dur + 0.02)
+}
+function musicPump(){
+  if (!ac || !mus.on) return
+  const S = TRACKS[mus.track]
+  const rowSec = S.speed / FPS
+  if (mus.t < ac.currentTime - 0.1) mus.t = ac.currentTime + 0.05
+  while (mus.t < ac.currentTime + 0.2) {
+    const order = S.order[mus.pos], semis = order[4]
+    CH.forEach((ch, i) => {
+      const e = EV[mus.track][ch][order[i]][mus.row]
+      if (!e) return
+      const dur = e.len * rowSec
+      if (ch === 'noise') {
+        const m = /^([0-9A-F])(s?)$/.exec(e.t)
+        if (m) voice('noise', mus.t, dur, CPU / NOISE_PERIODS[parseInt(m[1], 16)], {...INST.noise, mode: !!m[2]}, gate.noise)
+      } else {
+        const n = parseNote(e.t)
+        if (n) voice(ch, mus.t, dur, n.hz * 2 ** (semis / 12), INST[ch], gate[ch], n.arp)
+      }
+    })
+    mus.t += rowSec
+    if (++mus.row >= ROWS) { mus.row = 0; if (++mus.pos >= S.order.length) mus.pos = S.loop }
+  }
+}
+
+// ======================================================================= Sound effects
+// One entry per frame. A laser is a fast 12.5% descending sweep; an explosion is noise from a
+// low period with a long decay. `steal: false` lets a rapid-fire laser share pulse 2 with the
+// harmony instead of gating it silent eight times a second.
+const SFX = {
+  shoot: {ch: 'p2', duty: 3, steal: false, frames: [[1100,9],[900,8],[700,7],[520,6]]},
+  hit:   {ch: 'noise', frames: [[3,9],[4,8],[5,7]]},
+  boom:  {ch: 'noise', frames: Array.from({length: 16}, (_, i) => [5 + (i >> 1), Math.max(1, 13 - (i >> 1))])},
+  power: {ch: 'p2', duty: 1, frames: [[523,10],[659,11],[784,12],[1047,12],[0,0]]},
+  die:   {ch: 'p2', duty: 2, frames: Array.from({length: 22}, (_, i) => [Math.round(700 * 2 ** (-i / 8)), Math.max(1, 13 - (i >> 1))])},
+  bomb:  {ch: 'noise', frames: Array.from({length: 20}, (_, i) => [Math.min(15, 2 + (i >> 1)), Math.max(1, 13 - (i >> 1))])},
+  bosshit: {ch: 'noise', frames: [[8,10],[9,8],[10,6],[11,4]]},
+  extra: {ch: 'p2', duty: 1, frames: [[523,10],[659,10],[784,11],[1047,12],[1319,12],[1568,12],[0,0]]},
+  wave:  {ch: 'p2', duty: 2, frames: [[440,10],[554,10],[659,11],[880,12],[0,0]]},
+  warn:  {ch: 'p2', duty: 3, frames: [[880,11],[0,0],[880,11],[0,0],[880,11],[0,0]]},
+  over:  {ch: 'p2', duty: 2, frames: Array.from({length: 30}, (_, i) => [Math.round(440 * 2 ** (-i / 12)), Math.max(1, 12 - (i >> 2))])}}
+function sfx(name){
+  if (!ac) return
+  const s = SFX[name], fs = 1 / FPS, t0 = ac.currentTime + 0.01, end = t0 + s.frames.length * fs
+  const src = ac.createBufferSource(), g = ac.createGain()
+  src.buffer = bufOf(s.ch, s.duty ?? 2, s.mode); src.loop = true
+  s.frames.forEach(([a, vol], i) => {
+    const hz = s.ch === 'noise' ? CPU / NOISE_PERIODS[a] : pulseHz(a)
+    src.playbackRate.setValueAtTime(rateOf(s.ch, hz || 1), t0 + i * fs)
+    g.gain.setValueAtTime(hz ? vol * COEF[s.ch] : 0, t0 + i * fs)
+  })
+  g.gain.setValueAtTime(0, end)
+  src.connect(g).connect(master)
+  src.start(t0); src.stop(end + 0.02)
+  if (s.steal !== false) { gate[s.ch].gain.setValueAtTime(0, t0); gate[s.ch].gain.setValueAtTime(1, end) }
+}
+
+// ======================================================================= Joypad
+// One shared input deck from motor.js: keyboard, an on-screen stick and buttons, and the
+// TOUCH/KEYS setting, all saved under `galacticaOpt`. Dragging the playfield steers toward the
+// finger - a shmup wants a held direction, which a four-way flick cannot give you.
+const ctl = MOTCH.create({
+  slot: 'galactica', canvas: '#tv', lift: 34,
+  unlock: audioUnlock,
+  keys: {ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R',
+         KeyW:'U', KeyS:'D', KeyA:'L', KeyD:'R',
+         Space:'A', KeyX:'A', KeyZ:'B',
+         Enter:'START', KeyP:'START', ShiftLeft:'SELECT', ShiftRight:'SELECT', Tab:'SELECT'},
+  buttons: {left:  [{b:'SELECT', label:'SELECT'}, {b:'B', label:'BOMB'}],
+            right: [{b:'A', label:'FIRE'}, {b:'START', label:'START'}]}})
+const pad = ctl.pad, opt = ctl.opt
+const pressed = ctl.hit
+const syncPad = ctl.sync
+const applySound = () => { if (master) master.gain.value = opt.sound === 'ON' ? MASTER_GAIN : 0 }
+
+// ======================================================================= Game
+// Galaga's shape, which is not the vertical scroller this cart used to be: a formation of
+// enemies that sways, peels off in dive runs, and a boss that can capture your fighter. The
+// player stays 8.8 fixed point; enemies move in whole floats, which is all a scripted path wants.
+const PX = 256
+const WORLD_PX = WH * 16 - 208                  // scroll wraps before the field runs out
+
+// Formation geometry: five columns, two rows, plus a boss on each flank of the back row.
+const FCOL = 5, FSTEP_X = 24, FX0 = 68, FROW_Y = [30, 74]
+const KIND = {BEE: 0, BFLY: 1, BOSS: 2}
+const SLOTS = []
+for (let c = 0; c < FCOL; c++) SLOTS.push({col: c, row: 1, kind: KIND.BEE})
+for (const c of [0, 4]) SLOTS.push({col: c, row: 0, kind: KIND.BOSS})
+for (const c of [1, 2, 3]) SLOTS.push({col: c, row: 0, kind: KIND.BFLY})
+const NF = SLOTS.length                          // ten enemies, forty sprites
+
+const SCORE = [50, 80, 150]                      // bee, butterfly, boss
+const BOSS_LAST = 400                            // the last boss on the board pays Galaga's bonus
+const DIVE_BONUS = 2                             // a diving enemy is worth double
+const STAGE_MAX = 18
+
+let state = 'TITLE', frame = 0, score = 0, hi = 0, lives = 3
+let stage = 1, phase = 'ENTER', phaseT = 0, readyT = 0, banner = '', bannerT = 0, optCur = 0
+let scrollAcc = 0, farAcc = 0, demo = false, titleT = 0, nextLife = 20000
+let formX = FX0, foeT = 60, bossT = 460, captive = null, carrier = null
+let top = {score: 0, stage: 1}                   // battery-backed best, read by scores.html
+let lastRun = null                               // scores.html reads this back
+let rng = 0xACE1
+const rand = () => { rng ^= rng << 7; rng ^= rng >>> 9; rng ^= rng << 8; rng &= 0xFFFF; return rng / 0x10000 }
+
+const P = {x: 120*PX, y: 176*PX, vx: 0, vy: 0, power: 1, bombs: 0, cool: 0, invuln: 90,
+           dying: 0, captured: 0, dual: false, bank: 0, muzzle: 0}
+const FOES  = Array.from({length: NF}, () => ({live: false, kind: 0, slot: 0, state: 'FORM', x: 0, y: 0,
+                  hp: 1, t: 0, fire: 0, path: null, pi: 0, delay: 0, spd: 1.6, diving: false, flap: 0}))
+const PBULL = Array.from({length: 6}, () => ({live: false, x: 0, y: 0, vx: 0, vy: -7}))
+const EBULL = Array.from({length: 5}, () => ({live: false, x: 0, y: 0, vx: 0, vy: 0}))
+const PUFFS = Array.from({length: 2}, () => ({live: false, x: 0, y: 0, t: 0}))
+// Two slots, because a power-up and a bomb can be on the way down at the same time.
+const POWERS = Array.from({length: 2}, () => ({live: false, x: 0, y: 0, vy: 1, kind: 'power'}))
+let shotsFired = 0, volleysFired = 0             // tallies, so a half volley can be proven rather than felt
+
+const hit = (ax, ay, aw, ah, bx, by, bw, bh) => ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by
+const pad6 = n => String(n % 1000000).padStart(6, '0')
+const textRow = (y, s) => text(0, y, (s + ' '.repeat(32)).slice(0, 32))
+
+const OPTIONS = [{k: 'input', label: 'INPUT', vals: ['TOUCH', 'KEYS']},
+                 {k: 'sound', label: 'SOUND', vals: ['ON', 'OFF']}]
+
+try {                                                // battery-backed save
+  Object.assign(top, JSON.parse(MOTCH.store.get('galacticaTop') || '{}'))
+} catch {}
+const saveRam = () => {
+  ctl.save()
+  MOTCH.store.set('galacticaTop', JSON.stringify(top))
+  if (lastRun) MOTCH.store.set('galacticaRun', JSON.stringify(lastRun))
+}
+
+function resetGame(){
+  score = 0; lives = 3; stage = 1; rng = 0xACE1; nextLife = 20000
+  captive = null; carrier = null; beam = null; banner = ''; bannerT = 0
+  scrollAcc = 0; formX = FX0; foeT = 90; lastRun = null
+  Object.assign(P, {x: 120*PX, y: 176*PX, vx: 0, vy: 0, power: 1, bombs: 0, cool: 0, invuln: 90,
+                    dying: 0, captured: 0, dual: false, bank: 0, muzzle: 0})
+  for (const f of FOES) f.live = false
+  for (const b of PBULL) b.live = false
+  for (const b of EBULL) b.live = false
+  for (const q of PUFFS) q.live = false
+  for (const p of POWERS) p.live = false
+  startMusic('stage')                        // a fresh run is the only thing that resets the tune
+  startStage()
+}
+const slotPos = (si, fx) => [fx + SLOTS[si].col * FSTEP_X, FROW_Y[SLOTS[si].row]]
+const puff = (x, y, life) => { const q = PUFFS.find(q => !q.live)
+  if (q) Object.assign(q, {live: true, x, y, t: life}) }
+const boom = (x, y) => { for (let i = 0; i < 2; i++) puff(x + (i & 1) * 8 - 4, y + (i >> 1) * 8 - 4, 8) }
+
+// Scroll in 8.8 and wrap the accumulator at the field height. The parallax layer runs at exactly
+// a third of the same step, so the two never drift apart. Galaga drifts, it does not race.
+function scrollField(step, farStep){
+  scrollAcc += step; farAcc += farStep
+  while (scrollAcc >= 0x100) { scrollAcc -= 0x100; scrollY = (scrollY + 1) % WORLD_PX }
+  while (farAcc >= 0x100) { farAcc -= 0x100; farScroll = (farScroll + 1) % FAR_H }
+}
+// Attract mode drives the pad itself. Same code path as a human, so the demo cannot desync.
+function demoPad(){
+  for (const k in pad) pad[k] = 0
+  const t = frame
+  if ((t % 200) < 70) pad.L = 1; else if ((t % 200) >= 130) pad.R = 1
+  if ((t % 300) < 110) pad.U = 1; else if ((t % 300) >= 220) pad.D = 1
+  pad.A = 1
+  if ((t % 420) < 6) pad.B = 1
+}
+function spawnEBull(x, y, vx, vy){
+  const b = EBULL.find(b => !b.live); if (!b) return
+  Object.assign(b, {live: true, x, y, vx, vy})
+}
+function dropPickup(x, y, kind){ const p = POWERS.find(p => !p.live)
+  if (p) Object.assign(p, {live: true, x, y, vy: 1, kind}) }
+
+// Galaga's shot: one stream, doubled at power 2, tripled at 3, and doubled again by a dual
+// fighter, because two ships means two muzzles.
+//
+// The pool is six, and a volley only leaves the ship if the whole pattern fits. Half a volley is
+// exactly what makes a shot look like it never happened - the muzzle flashes, the laser fires, and
+// one barrel is empty. So it waits a frame instead. The cooldown scales with the spread, which is
+// the cabinet's own "only so many shots on the screen" rule, made legible rather than silent.
+function fire(){
+  const px = P.x >> 8, py = P.y >> 8
+  let shots, cool
+  if (P.dual) { shots = [[px - 4, py - 4, 0], [px + 12, py - 4, 0]]; cool = 10 }
+  else if (P.power === 1) { shots = [[px + 4, py - 6, 0]]; cool = 7 }
+  else if (P.power === 2) { shots = [[px - 2, py - 2, 0], [px + 10, py - 2, 0]]; cool = 12 }
+  else { shots = [[px + 4, py - 8, 0], [px - 3, py - 2, -1], [px + 11, py - 2, 1]]; cool = 18 }
+  if (PBULL.filter(b => !b.live).length < shots.length) return 0
+  for (const [x, y, vx] of shots) Object.assign(PBULL.find(b => !b.live), {live: true, x, y, vx, vy: -7})
+  shotsFired += shots.length; volleysFired++
+  P.muzzle = 4
+  sfx('shoot')
+  return cool
+}
+function killPlayer(){
+  if (demo) { demo = false; titleT = 0; state = 'TITLE' }
+  else { mus.on = false; sfx('over'); endRun(); state = 'GAMEOVER' }
+}
+function endRun(){
+  lastRun = {score, stage, at: Date.now()}          // scores.html reads this back
+  if (score > (top.score | 0)) top = {score, stage}
+  saveRam()
+}
+// A hit costs a life. In a dual fighter you lose the extra ship and play on in a single, which is
+// what keeps the rescue worth chasing. A fighter sitting in the formation is lost with you.
+function playerHit(){
+  if (P.invuln || P.dying || P.captured) return
+  sfx('die'); boom(P.x >> 8, P.y >> 8)
+  P.dying = 50; P.power = 1; P.dual = false; flash = 2; shake = 12; lives--
+  if (captive) { captive = null; bossT = 400 }
+}
+// The bomb clears the screen: every enemy bullet goes, and every enemy that has joined the fight
+// dies - including one that is briefly off screen on its way back from a dive. Foes still parked
+// waiting to fly in are untouched, so it cannot skip a stage before it has started.
+function useBomb(){
+  if (P.bombs <= 0 || P.dying || P.captured) return
+  P.bombs--; flash = 2; shake = 20
+  P.invuln = Math.max(P.invuln, 60)
+  sfx('bomb')
+  for (const b of EBULL) if (b.live) { b.live = false; score += 5 }
+  for (const f of FOES) if (f.live && f.entered) killFoe(f, true)
+  beam = null; bossT = 300
+}
+function updatePlayer(){
+  if (P.captured > 0) {                              // the beam reels the fighter up the screen
+    const p = captivePos()
+    P.x = Math.round(P.x + (p[0] * PX - P.x) * 0.13)
+    P.y = Math.round(P.y + (p[1] * PX - P.y) * 0.13)
+    P.bank = (P.captured >> 2) & 1 ? -1 : 1           // the tumble, as the cabinet sells it
+    if (--P.captured === 0) {
+      if (lives <= 0) { killPlayer(); return }
+      Object.assign(P, {x: 120*PX, y: 176*PX, vx: 0, vy: 0, invuln: 120, dual: false})
+    }
+    return
+  }
+  if (P.dying > 0) {
+    if (--P.dying === 0) {
+      if (lives <= 0) { killPlayer(); return }
+      Object.assign(P, {x: 120*PX, y: 176*PX, vx: 0, vy: 0, invuln: 120})
+    }
+    return
+  }
+  if (pressed('B')) useBomb()
+  const spd = 0x1B0
+  let vx = 0, vy = 0
+  if (pad.ptr) {                                      // a finger beats a d-pad when you have one
+    const tx = pad.px * PX, ty = pad.py * PX
+    vx = Math.max(-spd, Math.min(spd, (tx - P.x) * 0.4)) | 0
+    vy = Math.max(-spd, Math.min(spd, (ty - P.y) * 0.4)) | 0
+  } else {
+    if (pad.L) vx -= spd
+    if (pad.R) vx += spd
+    if (pad.U) vy -= spd
+    if (pad.D) vy += spd
+    if (vx && vy) { vx = (vx * 0.7071) | 0; vy = (vy * 0.7071) | 0 }
+  }
+  P.vx = vx; P.vy = vy; P.x += vx; P.y += vy
+  P.x = Math.max(0, Math.min(240 * PX, P.x))
+  P.y = Math.max(0, Math.min(186 * PX, P.y))
+  if (!pad.ptr) P.bank = pad.L ? -1 : pad.R ? 1 : 0
+  else P.bank = vx < -4 ? -1 : vx > 4 ? 1 : 0
+  if (P.cool > 0) P.cool--
+  if (pad.A && P.cool === 0) P.cool = fire()      // zero when the pool is full: try again next frame
+  if (P.muzzle > 0) P.muzzle--
+}
+function updateBullets(){
+  for (const b of PBULL) if (b.live) { b.x += b.vx; b.y += b.vy
+    if (b.y < -10 || b.x < -10 || b.x > 260) b.live = false }
+  for (const b of EBULL) if (b.live) { b.x += b.vx; b.y += b.vy
+    if (b.y > 220 || b.y < -10 || b.x < -10 || b.x > 260) b.live = false }
+}
+// Formations sway as one body. Everything else about an enemy's position comes from its slot.
+function updateFormation(){ formX = (FX0 - 30) + Math.sin(frame * 0.016) * 30 }
+
+// Follow waypoints in whole pixels. A waypoint is reached when it is inside one step, so a path
+// can never stall on a rounding error or overshoot enough to be seen.
+function follow(f){
+  while (f.pi < f.path.length) {
+    const wx = f.path[f.pi][0], wy = f.path[f.pi][1]
+    const dx = wx - f.x, dy = wy - f.y, d = Math.hypot(dx, dy)
+    if (d <= f.spd) { f.x = wx; f.y = wy; f.pi++; continue }
+    f.x += dx / d * f.spd; f.y += dy / d * f.spd; return true
+  }
+  return false
+}
+// A dive peels out to the side the player is on, loops under the formation and comes down the
+// screen at them. Five points of helix plus a run at the bottom is the whole cabinet move.
+function divePath(f){
+  const x0 = f.x, y0 = f.y, px = (P.x >> 8) + 8
+  const s = (x0 + 8) < px ? 1 : -1
+  const pts = []
+  for (let k = 1; k <= 5; k++) {
+    const t = k / 5, a = t * Math.PI * 1.5
+    pts.push([x0 + s * Math.sin(a) * 86 + s * t * 16, y0 + t * 128])
+  }
+  pts.push([px + s * 46, 196], [px + s * 12, 236])
+  return pts
+}
+function killFoe(f, award){
+  const diving = f.diving
+  f.live = false; f.diving = false; f.pendingDive = false; f.state = 'SIT'
+  if (award) {
+    const lastBoss = f.kind === KIND.BOSS && !FOES.some(x => x.live && x.kind === KIND.BOSS)
+    score += (lastBoss ? BOSS_LAST : SCORE[f.kind]) * (diving ? DIVE_BONUS : 1)
+  }
+  boom(f.x + 8, f.y + 8); sfx('boom')
+  if (f.kind === KIND.BOSS && captive && !captive.free) {
+    captive.free = true; banner = 'FIGHTER FREED'; bannerT = 90; sfx('power')
+  }
+  // Drops. A power-up now and then; a bomb is the rare one, and mostly off a boss, so the rack
+  // fills from the enemies worth killing rather than from the clock.
+  const boss = f.kind === KIND.BOSS
+  if (rand() < (boss ? 0.60 : diving ? 0.16 : 0.05)) dropPickup(f.x + 4, f.y, 'power')
+  if (rand() < (boss ? 0.25 : diving ? 0.05 : 0.02)) dropPickup(f.x + 4, f.y, 'bomb')
+}
+function updateFoes(){
+  for (const f of FOES) if (f.live) {
+    f.t++; f.flap = (f.flap + 1) & 7
+    if (f.delay > 0) {
+      f.delay--
+      if (f.state === 'SIT') { const p = slotPos(f.slot, formX); f.x = p[0]; f.y = p[1] }
+      if (f.delay === 0 && f.pendingDive) {
+        f.pendingDive = false; f.diving = true; f.state = 'PATH'; f.pi = 0; f.path = divePath(f)
+      }
+      continue
+    }
+    f.entered = true                            // from here on it is in the fight, and a bomb takes it
+    if (f.state === 'PATH') {
+      if (!follow(f)) {
+        if (f.diving) {                               // off the bottom, so come back around
+          f.diving = false; f.state = 'BACK'
+          f.x = f.slot >= FCOL ? 276 : -20
+          f.y = -24
+        } else f.state = 'BACK'                       // glide home from the last waypoint
+      }
+    } else if (f.state === 'BACK') {
+      const p = slotPos(f.slot, formX)
+      const dx = p[0] - f.x, dy = p[1] - f.y, d = Math.hypot(dx, dy)
+      if (d <= f.spd) { f.x = p[0]; f.y = p[1]; f.state = 'SIT' }
+      else { f.x += dx / d * f.spd; f.y += dy / d * f.spd }
+    } else if (f.state === 'BEAM') {
+      // updateBeam owns this boss's position while the cone is up
+    } else {
+      const p = slotPos(f.slot, formX); f.x = p[0]; f.y = p[1]
+    }
+    if (f.fire > 0) f.fire--
+    else if (f.diving) {
+      const mx = f.x + 8, my = f.y + 12
+      const dx = (P.x >> 8) + 8 - mx, dy = (P.y >> 8) + 8 - my, d = Math.hypot(dx, dy) || 1
+      f.fire = Math.max(26, 58 - stage * 3)
+      spawnEBull(mx, my, Math.round(dx / d * 2), Math.max(1, Math.round(dy / d * 2)))
+    } else if (f.state === 'SIT' && rand() < 0.003) {
+      f.fire = 90
+      spawnEBull(f.x + 8, f.y + 14, 0, 2)
+    }
+  }
+}
+// Groups peel out of the formation on a timer. Later stages send more of them, more often.
+function updateDives(){
+  if (phase !== 'FIGHT') return
+  if (--foeT > 0) return
+  const ready = FOES.filter(f => f.live && f.state === 'SIT' && !f.diving)
+  if (!ready.length) return
+  foeT = Math.max(40, 118 - stage * 6) + Math.floor(rand() * 40)
+  const n = Math.min(ready.length, 2 + ((stage + 1) >> 1), 4)
+  for (let i = 0; i < n; i++) {
+    const f = ready[(Math.floor(rand() * ready.length) + i) % ready.length]
+    if (f.pendingDive) continue
+    f.pendingDive = true; f.delay = i * 7
+    f.spd = 1.9 + Math.min(1.4, stage * 0.13)
+  }
+}
+// The capture beam. A boss leaves the formation, hangs under you, and opens a cone. It tracks you
+// at about two thirds of your speed, so the way out is to keep moving, which is the whole fight.
+function startBeam(f){
+  // It commits to the column you were standing in, not the one you keep moving to, so a boss can
+  // always arrive and the way out is to not be there when the cone opens.
+  beam = {boss: f, tx: Math.max(10, Math.min(238, P.x >> 8)), x: Math.round(f.x) + 8,
+          y0: 0, y1: 0, w: 0, t: 0, phase: 'AIM'}
+  f.state = 'BEAM'
+  sfx('warn'); banner = 'CAPTURE BEAM'; bannerT = 90
+}
+function updateBeam(){
+  if (!beam) return
+  const f = beam.boss
+  if (!f.live) { beam = null; return }                // killing the boss shuts the cone down
+  beam.x = f.x + 8
+  beam.y0 = Math.round(f.y) + 26
+  beam.y1 = Math.min(beam.y0 + 172, 234)
+  if (beam.phase === 'AIM') {
+    // It slides underneath where you were, and only then opens. Standing still is what gets you
+    // taken; moving off the column is the whole counterplay.
+    beam.t++
+    f.x += Math.max(-1.8, Math.min(1.8, beam.tx - f.x))
+    if (Math.abs(beam.tx - f.x) < 2 || beam.t > 200) { beam.phase = 'OPEN'; beam.t = 0 }
+  } else if (beam.phase === 'OPEN') {
+    beam.w = 15 * Math.min(1, beam.t / 24)
+    if (++beam.t > 24) { beam.phase = 'HOLD'; beam.t = 0 }
+  } else if (beam.phase === 'HOLD') {
+    beam.w = 15
+    if (++beam.t > 70) { beam.phase = 'CLOSE'; beam.t = 0 }
+    else if (!P.captured && !P.dying && !P.invuln) {
+      const cx = (P.x >> 8) + 8
+      if (Math.abs(cx - beam.x) < beam.w && (P.y >> 8) < beam.y1) captured()
+    }
+  } else {
+    beam.w = 15 * Math.max(0, 1 - beam.t / 20)
+    if (++beam.t > 20) { f.state = 'BACK'; beam = null; bossT = 520; return }
+  }
+}
+function updateBosses(){
+  if (beam || captive || P.captured || phase !== 'FIGHT') return
+  if (--bossT > 0) return
+  const b = FOES.find(f => f.live && f.kind === KIND.BOSS && f.state === 'SIT')
+  if (!b) return
+  bossT = Math.max(220, 640 - stage * 26)
+  startBeam(b)
+}
+// The taken fighter hangs at the top of the screen. It is not a formation slot, because the
+// formation is full when the beam fires and a captive has to live somewhere.
+const CAPTIVE_Y = 14
+function captivePos(){ return [120 + Math.sin(frame * 0.016) * 12, CAPTIVE_Y] }
+function captured(){
+  if (captive) return
+  const p = captivePos()
+  captive = {free: false, x: p[0], y: p[1]}
+  P.captured = 44; P.vx = 0; P.vy = 0; P.dual = false
+  beam = null; bossT = 460; flash = 2; shake = 14
+  sfx('die'); lives--
+}
+function updateCaptive(){
+  if (!captive) return
+  if (!captive.free) { const p = captivePos(); captive.x = p[0]; captive.y = p[1]; return }
+  captive.y += 0.6                                    // freed, it floats down to be collected
+  if (captive.y > 220) captive = null
+}
+function updatePickups(){
+  for (const p of POWERS) if (p.live) { p.y += p.vy; if (p.y > 210) p.live = false }
+}
+// A stage opens with the bees flying in, then the back row, exactly as the cabinet does it.
+function entryPath(side, i){
+  const s = side, x0 = 128 + s * 168, x1 = 128 - s * 168
+  return [[x0, 40 + i * 5], [x0 - s * 90, 112 + i * 9], [x1 + s * 40, 148 + i * 6],
+          [x1, 76 + i * 4], [x1 + s * 70, -30]]
+}
+function startStage(){
+  phase = 'ENTER'; phaseT = 0
+  for (const f of FOES) Object.assign(f, {live: false, diving: false, pendingDive: false, delay: 0, state: 'SIT'})
+  captive = null; beam = null; carrier = null
+  bossT = 460 + Math.floor(rand() * 200)
+  formX = FX0 - 30
+  const groups = [[], []]
+  SLOTS.forEach((s, i) => groups[s.kind === KIND.BEE ? 0 : 1].push(i))
+  const side = (stage & 1) ? -1 : 1
+  groups.forEach((group, gi) => group.forEach((si, i) => {
+    const f = FOES[si], st = SLOTS[si]
+    Object.assign(f, {live: true, kind: st.kind, slot: si, state: 'PATH', pi: 0,
+      hp: st.kind === KIND.BOSS ? 2 : 1, t: 0, fire: 40 + Math.floor(rand() * 40), flap: 0,
+      delay: gi * 56 + i * 9, spd: 2.4 + Math.min(1.2, stage * 0.09), entered: false,
+      path: entryPath(side * (gi ? -1 : 1), i)})
+    f.x = f.path[0][0]; f.y = f.path[0][1]              // parked off-screen until its turn
+  }))
+  banner = 'STAGE ' + stage; bannerT = 120; sfx('wave')
+}
+function updatePhase(){
+  if (phase === 'ENTER') {
+    if (FOES.every(f => !f.live || f.state === 'SIT')) { phase = 'FIGHT'; foeT = 110 }
+    return
+  }
+  if (phase === 'FIGHT') {
+    if (!FOES.some(f => f.live)) {
+      phase = 'CLEAR'; phaseT = 170
+      const bonus = Math.max(0, lives) * 1000            // the cabinet pays you for what you kept
+      score += bonus
+      banner = 'STAGE ' + stage + ' CLEAR  ' + bonus
+      sfx('extra')
+    }
+    return
+  }
+  if (--phaseT > 0) return
+  if (stage >= STAGE_MAX) {
+    if (demo) { demo = false; titleT = 0; state = 'TITLE' }
+    else { mus.on = false; sfx('over'); endRun(); state = 'GAMEOVER' }
+  } else { stage++; startStage() }
+}
+function collide(){
+  const px = P.x >> 8, py = P.y >> 8
+  const cw = P.dual ? 12 : 4                             // two ships make a wider target
+  const cx = px + (P.dual ? 2 : 6), cy = py + 6
+  for (const b of PBULL) {
+    if (!b.live) continue
+    const bx = b.x, by = b.y + 1
+    for (const f of FOES) {
+      if (!f.live) continue
+      const big = f.kind === KIND.BOSS, o = big ? 3 : 2, sz = big ? 26 : 12
+      if (!hit(bx, by, 6, 6, f.x + o, f.y + o, sz, sz)) continue
+      b.live = false; f.hp--
+      if (f.hp <= 0) killFoe(f, true)
+      else { puff(b.x, b.y, 6); sfx('hit') }
+      break
+    }
+  }
+  // Touching your own freed fighter is the rescue, and it is what the whole fight is for.
+  if (captive && captive.free && hit(cx, cy, cw, 4, captive.x + 4, captive.y + 4, 8, 8)) {
+    captive = null; P.dual = true; score += 1000; flash = 2; sfx('extra')
+    banner = 'DUAL FIGHTER'; bannerT = 120
+  }
+  if (P.dying || P.captured || P.invuln) return
+  for (const b of EBULL) if (b.live && hit(cx, cy, cw, 4, b.x + 2, b.y + 2, 4, 4)) { b.live = false; playerHit(); return }
+  for (const f of FOES) if (f.live && hit(cx, cy, cw, 4, f.x + 2, f.y + 2, 12, 12)) { killFoe(f, false); playerHit(); return }
+  for (const p of POWERS) if (p.live && hit(cx, cy, cw, 4, p.x, p.y, 8, 8)) {
+    p.live = false
+    if (p.kind === 'bomb') {
+      if (P.bombs < 5) P.bombs++
+      score += 100; sfx('extra')
+    } else { if (P.power < 3) P.power++; score += 50; sfx('power') }
+  }
+}
+function updatePlay(){
+  scrollField(0x20, 0x0A)                    // Galaga drifts; the fight is fixed to the screen
+  if (P.invuln > 0) P.invuln--
+  updateFormation(); updateBeam(); updateBosses(); updateCaptive()
+  updatePlayer(); updateBullets(); updateFoes(); updateDives(); updatePickups(); collide()
+  for (const q of PUFFS) if (q.live && --q.t <= 0) q.live = false
+  updatePhase()
+  const want = beam ? 'boss' : 'stage'       // the boss theme is the "something is wrong" cue
+  if (mus.on) swapMusic(want)
+  if (score >= nextLife) { lives++; nextLife += 40000; sfx('extra') }
+  if (!demo && score > hi) hi = score
+}
+
+const centred = s => ' '.repeat(Math.max(0, (32 - s.length) >> 1)) + s
+
+function drawBar(){
+  if (state === 'TITLE') {
+    textRow(1, centred('GALACTICA'))
+    textRow(2, (frame >> 5) & 1 ? centred('PRESS START') : '')
+    textRow(3, top.score ? ' TOP ' + pad6(top.score) + '  STAGE ' + top.stage : centred('SELECT FOR OPTIONS'))
+    return
+  }
+  if (state === 'OPTIONS') {
+    textRow(0, centred('OPTIONS'))
+    OPTIONS.forEach((o, i) => textRow(1 + i, (i === optCur ? '> ' : '  ') + o.label.padEnd(13) + opt[o.k]))
+    textRow(3, '  U/D PICK   L/R SET   START OK')
+    return
+  }
+  if (state === 'DEMO') {
+    textRow(1, '  DEMO   SCORE ' + pad6(score)); textRow(2, 'STAGE ' + stage); textRow(3, '')
+    return
+  }
+  if (state === 'GAMEOVER') {
+    textRow(1, centred('GAME OVER'))
+    textRow(2, ('      SCORE ' + pad6(score)).padEnd(17) + 'STAGE ' + stage)
+    textRow(3, (frame >> 5) & 1 ? centred('PRESS START') : '')
+    return
+  }
+  textRow(1, ('SCORE ' + pad6(score)).padEnd(17) + 'HI ' + pad6(hi))
+  textRow(2, ('STAGE ' + stage).padEnd(10) + ('TOP ' + pad6(top.score)).padEnd(14) + 'SHIPS ' + Math.max(0, lives))
+  if (bannerT > 0) textRow(3, centred(banner))
+  else if (state === 'PAUSE') textRow(3, centred('PAUSED'))
+  else if (beam) textRow(3, centred('CAPTURE BEAM ACTIVE'))
+  else textRow(3, ('POWER ' + P.power + '  BOMB ' + P.bombs).padEnd(20) + (P.dual ? 'DUAL' : ''))
+}
+
+function tick(){
+  frame++; vramWrites = 0
+  if (flash > 0) flash--
+  if (shake > 0) shake--
+  if (bannerT > 0) bannerT--
+  musicPump()
+  if (state === 'TITLE') {
+    scrollField(0x30, 0x10)
+    if (pressed('START') || pressed('A')) { demo = false; resetGame(); state = 'PLAY' }
+    else if (pressed('SELECT')) { optCur = 0; state = 'OPTIONS'; sfx('wave') }
+    else if (++titleT > 600) { resetGame(); demo = true; state = 'DEMO' }
+  } else if (state === 'OPTIONS') {
+    scrollField(0x10, 0x05)
+    if (pressed('U')) { optCur = (optCur + OPTIONS.length - 1) % OPTIONS.length; sfx('power') }
+    else if (pressed('D')) { optCur = (optCur + 1) % OPTIONS.length; sfx('power') }
+    else if (pressed('L') || pressed('R')) {
+      const o = OPTIONS[optCur], i = o.vals.indexOf(opt[o.k])
+      const v = o.vals[(i + (pressed('R') ? 1 : o.vals.length - 1)) % o.vals.length]
+      if (o.k === 'input') ctl.setInput(v)
+      else { opt[o.k] = v; ctl.save(); applySound() }
+      sfx('wave')
+    } else if (pressed('START') || pressed('B')) { titleT = 0; state = 'TITLE'; sfx('wave') }
+  } else if (state === 'DEMO') {
+    if (pressed('START') || pressed('A') || pressed('B')) {   // any press takes the cabinet back
+      for (const k in pad) pad[k] = 0; pad.ptr = 0            // so the demo cannot leave a key held
+      syncPad()
+      demo = false; titleT = 0; bannerT = 0; state = 'TITLE'
+    } else { demoPad(); updatePlay() }
+  } else if (state === 'GAMEOVER') {
+    scrollField(0x18, 0x08)
+    if (pressed('START')) { titleT = 0; state = 'TITLE' }
+  } else if (state === 'PAUSE') {
+    if (pressed('START')) state = 'PLAY'
+  } else {
+    if (pressed('START')) state = 'PAUSE'
+    else updatePlay()
+  }
+  drawBar()
+  flushHud()
+  console.assert(vramWrites <= 32, 'VRAM budget exceeded: ' + vramWrites + ' tile writes in one frame')
+  syncPad()
+}
+
+function buildOAM(){
+  OAM.length = 0
+  const ty = BAR * 8
+  for (const p of POWERS) if (p.live) sprite(p.x, p.y + ty, p.kind === 'bomb' ? sprId.BOMB : sprId.POWER,
+                                             p.kind === 'bomb' ? 3 : 0)
+  for (const f of FOES) if (f.live) {
+    const x = Math.round(f.x), y = Math.round(f.y) + ty
+    if (f.kind === KIND.BOSS) meta16(x, y, 'BOSG', 3)
+    else meta16(x, y, f.kind === KIND.BEE ? (f.flap & 4 ? 'BEE2' : 'BEE') : (f.flap & 4 ? 'BFLY2' : 'BFLY'),
+                f.kind === KIND.BEE ? 1 : 2)
+  }
+  // The fighter they took is drawn on the enemy palette: same CHR, turned against you.
+  if (captive) meta16(Math.round(captive.x), Math.round(captive.y) + ty, 'SHIP', 2)
+  for (const b of EBULL) if (b.live) sprite(b.x, b.y + ty, sprId.EBULL, 2)
+  for (const b of PBULL) if (b.live) sprite(b.x, b.y + ty, sprId.PBULL, 0)
+  for (const q of PUFFS) if (q.live) sprite(q.x, q.y + ty, sprId[(q.t >> 2) & 1 ? 'PUFF1' : 'PUFF0'], 0)
+  if ((state === 'PLAY' || state === 'DEMO') && !P.dying && !P.captured && !(P.invuln > 0 && (frame >> 1) & 1)) {
+    const sx = P.x >> 8, sy = (P.y >> 8) + ty
+    const pose = P.bank < 0 ? 'SHIP_L' : P.bank > 0 ? 'SHIP_R' : 'SHIP'
+    if (P.dual) { meta16(sx - 8, sy, pose, 0); meta16(sx + 8, sy, pose, 0) }
+    else meta16(sx, sy, pose, 0)
+    sprite(sx + 4, sy + 14, sprId[(frame >> 2) & 1 ? 'FLAME1' : 'FLAME0'], 0)
+    if (P.muzzle > 0 && !P.dual) sprite(sx + 4, sy - 6, sprId.MUZZLE, 0)
+  }
+}
+
+// ======================================================================= Self test
+function selfTest(){
+  const ok = (c, m) => { if (!c) throw Error('NES limit broken: ' + m) }
+  ok(bgChr.length <= 256, 'background pattern table holds 256, has ' + bgChr.length)
+  ok(sprChr.length <= 256, 'sprite pattern table holds 256, has ' + sprChr.length)
+  for (const [tag, set] of [['BG', BGPAL], ['SPR', SPRPAL]]) {
+    ok(set.length === 4, tag + ' has four sub-palettes')
+    set.forEach((p, i) => {
+      ok(p.length === 4 && p[0] === BACKDROP, tag + i + ' is four entries starting with the backdrop')
+      for (const c of p) ok(Number.isInteger(c) && c >= 0 && c < 64 && c !== 0x0D, tag + i + ' uses a legal colour, not ' + c)
+    })
+  }
+  for (const c of FARPAL) ok(Number.isInteger(c) && c >= 0 && c < 64 && c !== 0x0D, 'the far palette uses a legal colour, not ' + c)
+  ok(WORLD.length === WH && WORLD.every(r => r.length === WW), 'world rows are even and fill the screen')
+  ok(BAR * 8 + 208 === 240, 'status bar plus a 208 px playfield is one screen')
+  ok(WORLD_PX + 208 === WH * 16, 'the scroll window plus its wrap point fits the field')
+  for (const r of WORLD) for (const c of r) ok(META[c], 'metatile ' + c + ' is defined')
+  ok(BAR % 2 === 0, 'status bar ends on an attribute boundary')
+  // Parallax layer: one screen wide, at least one screen tall, and sparse enough to read as space.
+  ok(FAR.length === 256 * FAR_H, 'the far layer is 256 x ' + FAR_H)
+  ok(FAR_H >= 240, 'the far layer is at least one screen tall')
+  let farLit = 0
+  for (const v of FAR) { ok(v <= 3, 'far layer holds a colour index of ' + v); if (v) farLit++ }
+  ok(farLit > 40 && farLit < FAR.length / 40, 'the far layer has ' + farLit + ' stars, wants a sparse field')
+  const loops = []
+  for (const [tn, S] of Object.entries(TRACKS)) {
+    for (const ch of CH) for (const [name, pat] of Object.entries(S.pat[ch])) {
+      const toks = tokens(pat)
+      ok(toks.length === ROWS, tn + ' ' + ch + ' pattern ' + name + ' is ' + toks.length + ' rows, must be ' + ROWS)
+      for (const t of toks) ok(t === '.' || t === '-' || (ch === 'noise' ? /^[0-9A-F]s?$/.test(t) : parseNote(t)),
+                               tn + ' ' + ch + ' pattern ' + name + ' has a bad token ' + t)
+    }
+    ok(S.loop >= 0 && S.loop < S.order.length, tn + ': the loop point is inside the order list')
+    S.order.forEach((r, i) => {
+      CH.forEach((ch, c) => ok(S.pat[ch][r[c]], tn + ' order row ' + i + ' names a missing ' + ch + ' pattern ' + r[c]))
+      ok(Number.isInteger(r[4]), tn + ' order row ' + i + ' needs a whole-semitone transpose')
+      if (i) ok(r.some((p, c) => p !== S.order[i - 1][c]), tn + ' order row ' + i + ' repeats the row before it on every channel')
+    })
+    const loopSec = (S.order.length - S.loop) * ROWS * S.speed / FPS
+    ok(loopSec >= S.minLoop, tn + ': the loop body is ' + loopSec.toFixed(1) + ' s, under the ' + S.minLoop + ' s floor')
+    ok(new Set(S.order.slice(S.loop).map(r => r[0])).size >= 3, tn + ': the loop body needs at least three distinct melody patterns')
+    ok(new Set(S.order.slice(S.loop).map(r => r[2])).size >= 2, tn + ': the bass is one pattern for the whole loop')
+    loops.push(tn + ' ' + loopSec.toFixed(1) + 's')
+  }
+  for (const [k, s] of Object.entries(SFX)) {
+    ok(CH.includes(s.ch) && s.frames.length, 'effect ' + k)
+    for (const [a, vol] of s.frames) ok(vol >= 0, 'effect ' + k + ' has a negative volume')
+  }
+  ok(SCORE.length === 3, 'three enemy kinds need three score values')
+  ok(POWERS.length >= 2, 'the drop pool must hold a power-up and a bomb at the same time')
+  ok(sprId.BOMB !== undefined && sprId.POWER !== undefined, 'both drop sprites are in CHR')
+  ok(OPTIONS.length === 2, 'two cart options')
+  for (const o of OPTIONS) ok(o.vals.includes(opt[o.k]), 'saved setting ' + o.k + ' is a legal value')
+  // The formation must fit the playfield and stay on screen through the whole sway.
+  ok(SLOTS.length === NF, 'every formation slot owns one enemy')
+  ok(NF === FOES.length, 'the enemy pool is exactly one per slot: ' + NF)
+  for (const s of SLOTS) {
+    ok(s.col >= 0 && s.col < FCOL && s.row >= 0 && s.row < FROW_Y.length, 'slot ' + s.col + ',' + s.row + ' is on the grid')
+    const p = slotPos(SLOTS.indexOf(s), FX0)
+    ok(p[0] >= 0 && p[0] + 16 <= 256, 'a slot sits off screen at rest')
+    ok(p[1] >= 0 && p[1] + 16 <= 208, 'a slot sits outside the playfield')
+  }
+  const sway = FX0 - 30 - 30                               // the leftmost the origin ever drifts
+  ok(sway >= 0 && FX0 - 30 + 30 + (FCOL - 1) * FSTEP_X + 16 <= 256, 'the formation stays on screen as it sways')
+  ok(new Set(SLOTS.map(s => s.kind)).size === 3, 'the formation uses all three enemy kinds')
+  ok(SLOTS.filter(s => s.kind === KIND.BOSS).length === 2, 'two boss Galaga, as the cabinet ships them')
+  // The beam has to be able to reach the player, or the capture can never happen.
+  const band = slotPos(0, FX0)
+  ok(band[1] + 26 + 172 >= 186, 'the capture beam reaches the player row')
+  // Sprite budget. A dual fighter is the worst case: two ships plus everything they can throw.
+  const single = 4 + 1 + 1
+  const dual = 4 + 4 + 1              // two ships and one shared flame: a muzzle flash on top of
+                                      // that would put the worst case one sprite over budget
+  const common = PBULL.length + EBULL.length + PUFFS.length + POWERS.length
+  const oamSingle = FOES.length * 4 + common + single
+  const oamDual = FOES.length * 4 + common + dual
+  ok(oamSingle <= 64, 'a stage needs ' + oamSingle + ' sprites, over the 64 OAM budget')
+  ok(oamDual <= 64, 'a dual fighter needs ' + oamDual + ' sprites, over the 64 OAM budget')
+  console.log('NES OK: CHR ' + bgChr.length + '+' + sprChr.length + ' of 256 each, far stars ' + farLit +
+    ', loops ' + loops.join(' / ') + ', OAM ' + oamSingle + ' single / ' + oamDual + ' dual')
+}
+
+// ======================================================================= NTSC frame clock
+const FRAME_MS = 1000 / FPS
+let acc = 0, last = performance.now()
+function loop(now){
+  acc += now - last; last = now
+  if (acc > FRAME_MS * 8) acc = FRAME_MS
+  while (acc >= FRAME_MS) { acc -= FRAME_MS; tick() }
+  buildOAM(); render()
+  requestAnimationFrame(loop)
+}
+
+selfTest(); paintWorld(); drawBar(); flushHud(); requestAnimationFrame(loop)
+
+window.NES = {
+  tick, draw: () => { buildOAM(); render() }, sfx, audioUnlock, scrollField, useBomb, slotPos,
+  song: () => ({track: mus.track, pos: mus.pos, row: mus.row, on: mus.on}),
+  press: b => { pad[b] = 1; tick(); pad[b] = 0; tick() },
+  hold: (b, n) => { pad[b] = 1; for (let i = 0; i < n; i++) tick(); pad[b] = 0; tick() },
+  setPad: (b, v) => { pad[b] = v ? 1 : 0 },      // a persistent hold, for scripted play
+  step: () => tick(),
+  power: n => { P.power = Math.max(1, Math.min(3, n)) },
+  bombs: n => { P.bombs = Math.max(0, Math.min(5, n)) },
+  drop: (kind, x, y) => dropPickup(x, y, kind),
+  dual: () => { P.dual = true },
+  clear: () => { for (const k in pad) pad[k] = 0; pad.ptr = 0; syncPad() },
+  start: () => { demo = false; resetGame(); state = 'PLAY' },
+  menu: () => { demo = false; titleT = 0; bannerT = 0; beam = null; state = 'TITLE' },
+  setInput: v => ctl.setInput(v),
+  stage: n => { demo = false; const keep = score; resetGame()
+                stage = Math.max(1, Math.min(STAGE_MAX, n)); score = keep; state = 'PLAY'; startStage() },
+  beamNow: () => { const b = FOES.find(f => f.live && f.kind === KIND.BOSS); return b ? startBeam(b) : null },
+  diveNow: () => { foeT = 0 },
+  killAll: () => { for (const f of FOES) if (f.live) killFoe(f, true) },
+  freeFighter: () => { if (captive) captive.free = true },
+  play: t => { startMusic(t) },
+  demo: () => { resetGame(); demo = true; state = 'DEMO' },
+  peek: () => ({state, frame, phase, demo, stage, scrollY, farScroll, flash, shake, banner, bannerT, score, hi, lives,
+    top: {...top}, lastRun, oam: OAM.length, chr: [bgChr.length, sprChr.length], power: P.power, bombs: P.bombs,
+    invuln: P.invuln, dying: P.dying, captured: P.captured, dual: P.dual, nextLife, input: opt.input, sound: opt.sound,
+    player: {x: P.x >> 8, y: P.y >> 8}, ptr: pad.ptr ? {x: Math.round(pad.px), y: Math.round(pad.py)} : null,
+    beam: beam ? {x: Math.round(beam.x), y0: beam.y0, y1: beam.y1, w: beam.w, phase: beam.phase} : null,
+    captive: captive ? {slot: captive.slot, free: captive.free, x: Math.round(captive.x), y: Math.round(captive.y)} : null,
+    foes: FOES.filter(f => f.live).map(f => ({kind: f.kind, slot: f.slot, st: f.state, x: Math.round(f.x),
+      y: Math.round(f.y), hp: f.hp, diving: f.diving})),
+    shotsFired, volleysFired,
+    pb: PBULL.filter(b => b.live).length,
+    eb: EBULL.filter(b => b.live).length,
+    ebs: EBULL.filter(b => b.live).map(b => ({x: b.x, y: b.y, vx: b.vx, vy: b.vy}))})
+}
+})()
+</script>
+</body>
+</html>
