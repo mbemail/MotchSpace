@@ -1,0 +1,1678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="NES-style block stacker with a hold slot, wall kicks and T-spins." />
+  <title>TETRO</title>
+  <style>
+    :root {
+      --bg: #000;
+      --panel: #0a0a0a;
+      --frame: #8a8a8a;
+      --text: #e8e8e8;
+      --muted: #a0a0a0;
+    }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #000;
+      color: var(--text);
+      font-family: "Courier New", Courier, monospace;
+      image-rendering: pixelated;
+      overflow: hidden;
+    }
+
+    .wrap {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: #000;
+      padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+    }
+
+    a.board {
+      color: #7c7c7c;
+      text-decoration: none;
+      font: 700 13px/1 "Courier New", Courier, monospace;
+      letter-spacing: 0.14em;
+      border: 2px solid #7c7c7c;
+      padding: 0.7rem 1.1rem;
+    }
+    a.board:hover, a.board:focus { border-color: #b8f818; color: #b8f818; }
+
+    .screen {
+      position: relative;
+      line-height: 0;
+    }
+
+    canvas {
+      width: min(96vw, 960px);
+      max-width: 96vw;
+      height: auto;
+      border: 4px solid #5c5c5c;
+      background: #000;
+      box-shadow: 0 0 0 4px #111;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+
+    #tv {
+      display: none;
+      width: min(96vw, 640px);
+    }
+
+    #mode {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      font: 700 12px/1 "Courier New", Courier, monospace;
+      letter-spacing: 0.12em;
+      color: #e8e8e8;
+      background: #000;
+      border: 2px solid #8a8a8a;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    #mode:hover { color: #000; background: #b8f818; border-color: #b8f818; }
+
+    .hint {
+      position: fixed;
+      left: 12px;
+      bottom: 10px;
+      color: #9c9c9c;
+      font-size: 12px;
+      letter-spacing: 0.5px;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    /* Mobile deck from motor.js. The canvas is capped by both axes (4/3 New, 16/15 Classic)
+       so it always clears the deck, and the pad shares the row width evenly. */
+    body.touch .hint { display: none !important; }
+    .shot .hint { display: none !important; }
+    body.touch .wrap { padding-bottom: 96px !important; }
+    body.touch #mode { position: static !important; display: block !important; margin: 8px auto 0 !important; }
+    body.touch #tv { width: min(96vw, 66vh) !important; }
+    body.touch #game { width: min(96vw, 83vh) !important; }
+    body.touch #pad { justify-content: center !important; gap: .3rem !important; flex-wrap: wrap !important; }
+    body.touch #pad .grp { flex: 1 1 0 !important; justify-content: center !important; gap: .3rem !important; }
+    body.touch #pad button { flex: 1 1 0 !important; min-width: 0 !important; padding: .7rem .35rem !important; font-size: 11px !important; letter-spacing: .04em !important; }
+    @media (orientation: landscape) {
+      body.touch #tv { width: min(96vw, 58vh) !important; }
+      body.touch #game { width: min(96vw, 74vh) !important; }
+      body.touch #pad button { padding: 1rem 1.2rem !important; font-size: 12px !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="screen" id="screen">
+      <canvas id="game" width="768" height="576" aria-label="Tetro canvas"></canvas>
+      <canvas id="tv" width="256" height="240" aria-label="Tetro NES Classic canvas"></canvas>
+      <button id="mode" type="button" title="Switch NES Classic / New (N)">NES CLASSIC</button>
+    </div>
+    <a class="board" href="scores.html#tetro">SCORES + COMMENTS</a>
+  </div>
+  <div class="hint">Arrows: move / soft drop / rotate | Space hard drop | C or Shift hold | Enter/Space start | M mute | N mode</div>
+
+  <script src="motor.js"></script>
+  <script>
+    (() => {
+      const canvas = document.getElementById('game');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.imageSmoothingEnabled = false;
+
+      const FPS = 60.0988; // NES NTSC frame rate approximation
+      const FRAME_MS = 1000 / FPS;
+
+      const BOARD_W = 10;
+      const VISIBLE_H = 20;
+      const HIDDEN_H = 2;
+      const BOARD_H = VISIBLE_H + HIDDEN_H;
+      const TILE = 24;
+      const BOARD_X = 264;
+      const BOARD_Y = 48;
+      const PANEL_X = 552;
+      const PANEL_W = 160;
+      const LEFT_PANEL_X = 56;
+      const LEFT_PANEL_W = 160;
+
+      const GRAVITY_TABLE = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+      const SCORE_TABLE = [0, 40, 100, 300, 1200];
+
+      // NES-ish flat palette (solid colors, no gradients)
+      const COLORS = {
+        I: '#00c8c8',
+        O: '#d8d800',
+        T: '#b040ff',
+        S: '#00d860',
+        Z: '#ff4040',
+        J: '#3a6cff',
+        L: '#ff9a20',
+        G: '#6a6a6a',
+        FLASH: '#f0f0f0'
+      };
+
+      // Right-handed Nintendo Rotation System states.
+      // These are defined as explicit cell offsets to preserve NES-era behavior.
+      const PIECES = {
+        I: [
+          [ [-1,0], [0,0], [1,0], [2,0] ],
+          [ [1,-1], [1,0], [1,1], [1,2] ],
+          [ [-1,1], [0,1], [1,1], [2,1] ],
+          [ [0,-1], [0,0], [0,1], [0,2] ]
+        ],
+        O: [
+          [ [0,0], [1,0], [0,1], [1,1] ],
+          [ [0,0], [1,0], [0,1], [1,1] ],
+          [ [0,0], [1,0], [0,1], [1,1] ],
+          [ [0,0], [1,0], [0,1], [1,1] ]
+        ],
+        T: [
+          [ [-1,0], [0,0], [1,0], [0,1] ],
+          [ [0,-1], [0,0], [0,1], [1,0] ],
+          [ [-1,0], [0,0], [1,0], [0,-1] ],
+          [ [0,-1], [0,0], [0,1], [-1,0] ]
+        ],
+        J: [
+          [ [-1,0], [0,0], [1,0], [-1,1] ],
+          [ [0,-1], [0,0], [0,1], [1,1] ],
+          [ [-1,0], [0,0], [1,0], [1,-1] ],
+          [ [0,-1], [0,0], [0,1], [-1,-1] ]
+        ],
+        L: [
+          [ [-1,0], [0,0], [1,0], [1,1] ],
+          [ [0,-1], [0,0], [0,1], [1,-1] ],
+          [ [-1,0], [0,0], [1,0], [-1,-1] ],
+          [ [0,-1], [0,0], [0,1], [-1,1] ]
+        ],
+        S: [
+          [ [0,0], [1,0], [-1,1], [0,1] ],
+          [ [0,-1], [0,0], [1,0], [1,1] ],
+          [ [0,0], [1,0], [-1,1], [0,1] ],
+          [ [0,-1], [0,0], [1,0], [1,1] ]
+        ],
+        Z: [
+          [ [-1,0], [0,0], [0,1], [1,1] ],
+          [ [1,-1], [0,0], [1,0], [0,1] ],
+          [ [-1,0], [0,0], [0,1], [1,1] ],
+          [ [1,-1], [0,0], [1,0], [0,1] ]
+        ]
+      };
+
+      const PIECE_TYPES = ['T', 'J', 'Z', 'O', 'S', 'L', 'I'];
+
+      // SRS wall kicks in screen coordinates (+y is down). Kicks let a piece rotate
+      // out of a blocked pose, which is what makes a T-spin possible at all.
+      const KICKS = {
+        JLSTZ: [
+          [[0, 0], [-1, 0], [-1, -1], [0, 2], [-1, 2]],
+          [[0, 0], [1, 0], [1, 1], [0, -2], [1, -2]],
+          [[0, 0], [1, 0], [1, -1], [0, 2], [1, 2]],
+          [[0, 0], [-1, 0], [-1, 1], [0, -2], [-1, -2]]
+        ],
+        I: [
+          [[0, 0], [-2, 0], [1, 0], [-2, 1], [1, -2]],
+          [[0, 0], [-1, 0], [2, 0], [-1, -2], [2, 1]],
+          [[0, 0], [2, 0], [-1, 0], [2, -1], [-1, 2]],
+          [[0, 0], [1, 0], [-2, 0], [1, 2], [-2, -1]]
+        ]
+      };
+
+      // Diagonal neighbours of the piece centre; the T-spin is a "full" one when both
+      // corners on the side the nub points to are filled, otherwise a mini.
+      const CORNERS = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
+      const FRONT_CORNERS = [
+        [[-1, 1], [1, 1]],
+        [[1, -1], [1, 1]],
+        [[-1, -1], [1, -1]],
+        [[-1, -1], [-1, 1]]
+      ];
+
+      const TSPIN_SCORE = [400, 800, 1200, 1600];
+      const TSPIN_MINI_SCORE = [100, 200, 400, 0];
+
+      function pad(num, len) {
+        return String(num).padStart(len, '0');
+      }
+
+      // ---- 2.5D blocks: one cached 24x24 canvas per colour, bevelled into a lit cube ----
+      const blockTiles = new Map();
+      function shade(hex, amt) {
+        const n = parseInt(hex.slice(1), 16);
+        let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+        if (amt >= 0) { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
+        else { r *= 1 + amt; g *= 1 + amt; b *= 1 + amt; }
+        return 'rgb(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ')';
+      }
+      function blockTile(color) {
+        let c = blockTiles.get(color);
+        if (c) return c;
+        c = document.createElement('canvas');
+        c.width = TILE; c.height = TILE;
+        const g = c.getContext('2d');
+        const b = Math.max(4, Math.round(TILE * 0.2));
+        g.fillStyle = color; g.fillRect(0, 0, TILE, TILE);
+        g.fillStyle = shade(color, 0.45); g.fillRect(0, 0, TILE, b); g.fillRect(0, 0, b, TILE);
+        g.fillStyle = shade(color, -0.5); g.fillRect(0, TILE - b, TILE, b); g.fillRect(TILE - b, 0, b, TILE);
+        const grad = g.createLinearGradient(0, b, 0, TILE - b);
+        grad.addColorStop(0, shade(color, 0.16)); grad.addColorStop(1, shade(color, -0.14));
+        g.fillStyle = grad; g.fillRect(b, b, TILE - b * 2, TILE - b * 2);
+        g.fillStyle = 'rgba(255,255,255,0.5)';
+        g.fillRect(b + 2, b + 2, Math.round(TILE * 0.16), Math.round(TILE * 0.16));
+        g.strokeStyle = 'rgba(0,0,0,0.9)'; g.lineWidth = 2; g.strokeRect(1, 1, TILE - 2, TILE - 2);
+        blockTiles.set(color, c);
+        return c;
+      }
+
+      // ============================================================ NES Classic engine
+      // A second, period-accurate view of the same game: NES master palette, four BG + four
+      // sprite sub-palettes, 8x8 CHR tiles packed from digit art, a 64-sprite OAM pass, and the
+      // APU (two pulses, triangle, 15-bit noise) driven by a tracker. The shared Game decides
+      // every rule; this only draws and sounds them. The toggle swaps it with the smooth view.
+      const NES = (() => {
+        const MASTER = ('7C7C7C 0000FC 0000BC 4428BC 940084 A80020 A81000 881400 503000 007800 006800 005800 004058 000000 000000 000000 ' +
+                        'BCBCBC 0078F8 0058F8 6844FC D800CC E40058 F83800 E45C10 AC7C00 00B800 00A800 00A844 008888 000000 000000 000000 ' +
+                        'F8F8F8 3CBCFC 6888FC 9878F8 F878F8 F85898 F87858 FCA044 F8B800 B8F818 58D854 58F898 00E8D8 787878 000000 000000 ' +
+                        'FCFCFC A4E4FC B8B8F8 D8B8F8 F8B8F8 F8A4C0 F0D0B0 FCE0A8 F8D878 D8F878 B8F8B8 B8F8D8 00FCFC F8D8F8 000000 000000').split(' ')
+        const RGB = MASTER.map(h => { const n = parseInt(h, 16)
+          return (0xff << 24 | (n & 255) << 16 | (n >> 8 & 255) << 8 | (n >> 16 & 255)) >>> 0 })
+
+        const BACKDROP = 0x0F
+        // One sub-palette per piece: white highlight, a body colour, a matching shadow. That is
+        // eight BG and eight sprite palettes, past the cart's four - the deliberate break that
+        // buys seven readable colours. $0D stays banned and the colours stay master-palette.
+        const PIECE_ORDER = ['I', 'O', 'T', 'S', 'Z', 'J', 'L']
+        const BLOCK_PAL = {
+          I: [BACKDROP, 0x11, 0x21, 0x30],   // cyan
+          O: [BACKDROP, 0x18, 0x28, 0x30],   // yellow
+          T: [BACKDROP, 0x04, 0x23, 0x30],   // purple
+          S: [BACKDROP, 0x1A, 0x2A, 0x30],   // green
+          Z: [BACKDROP, 0x16, 0x26, 0x30],   // red
+          J: [BACKDROP, 0x02, 0x12, 0x30],   // blue
+          L: [BACKDROP, 0x17, 0x27, 0x30]    // orange
+        }
+        const HUD_PAL = [BACKDROP, 0x00, 0x10, 0x30]
+        const GHOST_PAL = [BACKDROP, 0x0F, 0x10, 0x30]
+        const BGPAL = [HUD_PAL, ...PIECE_ORDER.map(t => BLOCK_PAL[t])]      // 0 HUD, 1..7 blocks
+        const SPRPAL = [...PIECE_ORDER.map(t => BLOCK_PAL[t]), GHOST_PAL]
+        const PAL = {}; PIECE_ORDER.forEach((t, i) => PAL[t] = i + 1)       // BG palette per piece
+        const SPR = {}; PIECE_ORDER.forEach((t, i) => SPR[t] = i)           // sprite palette per piece
+        const GHOST_SPR = PIECE_ORDER.length
+
+        // ---- CHR ROM: 8x8 tiles of digits 0-3, packed once and validated as they go ----
+        const T8 = s => s.trim().split('\n').map(r => r.trim())
+        const pack = (name, rows) => {
+          const flat = rows.join('')
+          if (rows.length !== 8 || !/^[0-3]{64}$/.test(flat)) throw Error('CHR ' + name + ' is not 8x8 of digits 0-3')
+          return Uint8Array.from(flat, c => +c)
+        }
+        const bgChr = [], bgId = {}, sprChr = [], sprId = {}
+        const addBG = (n, t) => (bgId[n] = bgChr.push(pack(n, t)) - 1)
+        const addSPR = (n, t) => (sprId[n] = sprChr.push(pack(n, t)) - 1)
+
+        addBG('BLANK', T8('00000000\n'.repeat(8)))
+        addBG('WELL', T8('00000000\n00000000\n00000000\n00020000\n00000000\n00000000\n00000000\n00000000'))
+        addBG('FLASH', T8('33333333\n32222223\n32333323\n32333323\n32333323\n32333323\n32222223\n33333333'))
+
+        // One plain block: bright top and left, dark bottom and right. Pieces read apart by
+        // shape and by the three block sub-palettes, the way the cart does it.
+        const BLOCK = '33333333\n32222221\n32222221\n32222221\n32222221\n32222221\n32222221\n31111111'
+        addBG('BLK', T8(BLOCK)); addSPR('BLK', T8(BLOCK))
+        addSPR('GHOST', T8('22222222\n20000002\n20000002\n20000002\n20000002\n20000002\n20000002\n22222222'))
+
+        // 5x7 glyphs padded into 8x8 tiles; the NES font is uppercase only.
+        const FONT = {
+          A: '01110 10001 10001 11111 10001 10001 10001', B: '11110 10001 11110 10001 10001 10001 11110',
+          C: '01110 10001 10000 10000 10000 10001 01110', D: '11100 10010 10001 10001 10001 10010 11100',
+          E: '11111 10000 10000 11110 10000 10000 11111', F: '11111 10000 10000 11110 10000 10000 10000',
+          G: '01110 10001 10000 10111 10001 10001 01111', H: '10001 10001 10001 11111 10001 10001 10001',
+          I: '01110 00100 00100 00100 00100 00100 01110', J: '00111 00010 00010 00010 00010 10010 01100',
+          K: '10001 10010 10100 11000 10100 10010 10001', L: '10000 10000 10000 10000 10000 10000 11111',
+          M: '10001 11011 10101 10101 10001 10001 10001', N: '10001 11001 10101 10011 10001 10001 10001',
+          O: '01110 10001 10001 10001 10001 10001 01110', P: '11110 10001 10001 11110 10000 10000 10000',
+          Q: '01110 10001 10001 10001 10101 10010 01101', R: '11110 10001 10001 11110 10100 10010 10001',
+          S: '01111 10000 10000 01110 00001 00001 11110', T: '11111 00100 00100 00100 00100 00100 00100',
+          U: '10001 10001 10001 10001 10001 10001 01110', V: '10001 10001 10001 10001 10001 01010 00100',
+          W: '10001 10001 10001 10101 10101 10101 01010', X: '10001 10001 01010 00100 01010 10001 10001',
+          Y: '10001 10001 01010 00100 00100 00100 00100', Z: '11111 00001 00010 00100 01000 10000 11111',
+          0: '01110 10001 10011 10101 11001 10001 01110', 1: '00100 01100 00100 00100 00100 00100 01110',
+          2: '01110 10001 00001 00110 01000 10000 11111', 3: '11111 00010 00100 00010 00001 10001 01110',
+          4: '00010 00110 01010 10010 11111 00010 00010', 5: '11111 10000 11110 00001 00001 10001 01110',
+          6: '00110 01000 10000 11110 10001 10001 01110', 7: '11111 00001 00010 00100 01000 01000 01000',
+          8: '01110 10001 10001 01110 10001 10001 01110', 9: '01110 10001 10001 01111 00001 00010 01100',
+          '-': '00000 00000 00000 01110 00000 00000 00000', '.': '00000 00000 00000 00000 00000 01100 01100',
+          '!': '00100 00100 00100 00100 00100 00000 00100', '/': '00001 00010 00010 00100 01000 01000 10000',
+          '+': '00000 00100 00100 11111 00100 00100 00000', ':': '00000 01100 01100 00000 01100 01100 00000'
+        }
+        for (const [ch, g] of Object.entries(FONT)) {
+          const rows = g.split(' ').map(r => '0' + r + '00')
+          while (rows.length < 8) rows.push('00000000')
+          addBG('F' + ch, rows)
+        }
+        const glyph = ch => ch === ' ' ? bgId.BLANK : (bgId['F' + ch.toUpperCase()] ?? bgId.BLANK)
+
+        // ---- Framebuffer ----
+        const tv = document.getElementById('tv')
+        const tctx = tv.getContext('2d', { alpha: false })
+        tctx.imageSmoothingEnabled = false
+        const img = tctx.createImageData(256, 240)
+        const buf = new Uint32Array(img.data.buffer)
+        const CELL = 8, FIELD_X = 88, FIELD_Y = 40        // playfield: 10x20 cells of 8px
+
+        // ponytail: each tile carries its own palette, finer than the NES's 16x16 attribute
+        // cells. Real hardware would force 2x2-block palette groups; a stacker reads fine
+        // without that, so the finer table stands in for the attribute RAM.
+        function blit(tile, px, py, pal) {
+          for (let y = 0; y < 8; y++) {
+            const ty = py + y
+            if (ty < 0 || ty >= 240) continue
+            for (let x = 0; x < 8; x++) {
+              const tx = px + x
+              if (tx < 0 || tx >= 256) continue
+              buf[ty * 256 + tx] = RGB[pal[tile[y * 8 + x]]]
+            }
+          }
+        }
+        function txt(s, tx, ty, pal) {
+          s = String(s).toUpperCase()
+          for (let i = 0; i < s.length; i++) blit(bgChr[glyph(s[i])], (tx + i) * 8, ty * 8, pal)
+        }
+        const FRAME_LIGHT = RGB[0x10], FRAME_DARK = RGB[0x00], FRAME_BASE = RGB[0x0F]
+        function fillBuf(px, py, w, h, c) {
+          for (let y = py; y < py + h; y++) {
+            if (y < 0 || y >= 240) continue
+            for (let x = px; x < px + w; x++) { if (x < 0 || x >= 256) continue; buf[y * 256 + x] = c }
+          }
+        }
+        function bevelBox(px, py, w, h) {                 // lit top-left, shadowed bottom-right
+          fillBuf(px, py, w, h, FRAME_BASE)
+          fillBuf(px, py, w, 2, FRAME_LIGHT)
+          fillBuf(px, py, 2, h, FRAME_LIGHT)
+          fillBuf(px, py + h - 2, w, 2, FRAME_DARK)
+          fillBuf(px + w - 2, py, 2, h, FRAME_DARK)
+        }
+        const OAM = []
+        const sprite = (x, y, tile, pal) => { if (OAM.length < 64) OAM.push({ x, y, tile, pal }) }
+        function drawSprites() {
+          for (const s of OAM) {
+            const tile = sprChr[s.tile], pal = SPRPAL[s.pal]
+            for (let y = 0; y < 8; y++) {
+              const sy = s.y + y
+              if (sy < 0 || sy >= 240) continue
+              for (let x = 0; x < 8; x++) {
+                const sx = s.x + x
+                if (sx < 0 || sx >= 256) continue
+                const c = tile[y * 8 + x]
+                if (c) buf[sy * 256 + sx] = RGB[pal[c]]
+              }
+            }
+          }
+        }
+
+        function drawPreview(type, bx, by, bw, bh) {
+          if (!type) return
+          const cells = PIECES[type][0]
+          const xs = cells.map(c => c[0]), ys = cells.map(c => c[1])
+          const minX = Math.min(...xs), maxX = Math.max(...xs)
+          const minY = Math.min(...ys), maxY = Math.max(...ys)
+          const w = (maxX - minX + 1) * CELL, h = (maxY - minY + 1) * CELL
+          const ox = bx + ((bw - w) >> 1), oy = by + ((bh - h) >> 1)
+          for (const [cx, cy] of cells) blit(bgChr[bgId.BLK], ox + (cx - minX) * CELL, oy + (cy - minY) * CELL, BGPAL[PAL[type]])
+        }
+
+        function render(g) {
+          buf.fill(RGB[BACKDROP])
+          bevelBox(FIELD_X - 4, FIELD_Y - 4, 80 + 8, 160 + 8)
+          txt('SCORE ' + pad(g.score, 6), 1, 1, BGPAL[0])
+          txt('LINES ' + pad(g.lines, 3) + '   LEVEL ' + pad(g.level, 2), 1, 2, BGPAL[0])
+          txt('HOLD', 1, 5, BGPAL[0])
+          txt('NEXT', 24, 5, BGPAL[0])
+          bevelBox(8, 48, 64, 48)
+          bevelBox(184, 48, 64, 48)
+          drawPreview(g.holdType, 8, 48, 64, 48)
+          drawPreview(g.nextType, 184, 48, 64, 48)
+
+          const wellPal = HUD_PAL                     // plain grey floor grid
+          const clearing = g.state === 'lineclear' ? g.lineClearRows : null
+          for (let ry = 0; ry < 20; ry++) {
+            const by = ry + HIDDEN_H
+            const flash = clearing && clearing.includes(by) && (g.lineClearStep & 1)
+            for (let x = 0; x < BOARD_W; x++) {
+              const px = FIELD_X + x * CELL, py = FIELD_Y + ry * CELL
+              const cell = g.board.grid[by][x]
+              if (cell) {
+                if (flash) blit(bgChr[bgId.FLASH], px, py, BGPAL[0])
+                else blit(bgChr[bgId.BLK], px, py, BGPAL[PAL[cell]])
+              } else {
+                blit(bgChr[bgId.WELL], px, py, wellPal)
+              }
+            }
+          }
+
+          OAM.length = 0
+          if (g.piece && g.state === 'playing') {
+            let landY = g.piece.y
+            while (!g.board.collides(g.piece, g.piece.x, landY + 1, g.piece.rot)) landY++
+            if (landY !== g.piece.y) {
+              for (const c of g.piece.cells(g.piece.rot, g.piece.x, landY)) {
+                if (c.y < HIDDEN_H || c.y >= BOARD_H || c.x < 0 || c.x >= BOARD_W) continue
+                sprite(FIELD_X + c.x * CELL, FIELD_Y + (c.y - HIDDEN_H) * CELL, sprId.GHOST, GHOST_SPR)
+              }
+            }
+            for (const c of g.piece.cells()) {
+              if (c.y < HIDDEN_H || c.y >= BOARD_H) continue
+              sprite(FIELD_X + c.x * CELL, FIELD_Y + (c.y - HIDDEN_H) * CELL, sprId.BLK, SPR[g.piece.type])
+            }
+          }
+          if (g.bannerFrames > 0) txt(g.banner, 14 - ((g.banner.length) >> 1), 19, BGPAL[0])
+          if (g.state === 'start') {
+            txt('TETRO', 13, 12, BGPAL[0])
+            txt('PRESS ENTER OR SPACE', 8, 15, BGPAL[0])
+            txt('NES CLASSIC', 12, 17, BGPAL[0])
+          } else if (g.state === 'gameover') {
+            txt('GAME OVER', 13, 12, BGPAL[0])
+            txt('PRESS ENTER OR SPACE', 8, 15, BGPAL[0])
+          }
+          drawSprites()
+          tctx.putImageData(img, 0, 0)
+        }
+
+        // ============================================================ APU
+        const CPU = 1789773, FPS = 60.0988, WAVE_SR = 44100, STEP = 32
+        const NOISE_PERIODS = [4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068]
+        const DUTY = [[0, 1, 0, 0, 0, 0, 0, 0], [0, 1, 1, 0, 0, 0, 0, 0], [0, 1, 1, 1, 1, 0, 0, 0], [1, 0, 0, 1, 1, 1, 1, 1]]
+        const TRI_SEQ = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        const COEF = { p1: 0.00752, p2: 0.00752, tri: 0.00851, noise: 0.00494 }
+        const MASTER_GAIN = 3
+        const MUSIC_LEVEL = 0.5                   // songs sit 50% under the effects
+        let ac = null, master, gate, pulseBuf, triBuf, noiseBuf, songId = null, pendingSong = null
+        const pulseHz = f => { const p = Math.round(CPU / (16 * f)) - 1; return p < 8 || p > 0x7FF ? 0 : CPU / (16 * (p + 1)) }
+        const triHz = f => { const p = Math.round(CPU / (32 * f)) - 1; return p < 2 || p > 0x7FE ? 0 : CPU / (32 * (p + 1)) }
+        const SEMI = { C: 0, 'C#': 1, D: 2, 'D#': 3, E: 4, F: 5, 'F#': 6, G: 7, 'G#': 8, A: 9, 'A#': 10, B: 11 }
+
+        const ROWS = 32, MIN_LOOP_SECONDS = 20
+        const INST = { p1: { duty: 2, vol: 10, decay: 5, floor: 4, vib: { delay: 16, depth: 20, speed: 8 } },
+                       p2: { duty: 1, vol: 6, decay: 6, floor: 3 },
+                       tri: {}, noise: { vol: 6, decay: 2, floor: 0 } }
+        const CH = ['p1', 'p2', 'tri', 'noise']
+        const tokens = s => s.split(/\s+/).filter(t => t && t !== '|')
+        const delayTrack = (s, n) => { const t = tokens(s); return ['-', ...Array(n - 1).fill('.'), ...t.slice(0, t.length - n)].join(' ') }
+        const restPat = Array.from({ length: ROWS }, (_, i) => i ? '.' : '-').join(' ')
+        const parseNote = tok => {
+          const m = /^([A-G]#?)(\d)(?:\^([0-9A-F])([0-9A-F]))?$/.exec(tok)
+          return m && { hz: 440 * 2 ** ((SEMI[m[1]] + (+m[2] + 1) * 12 - 69) / 12),
+                        arp: m[3] ? [0, parseInt(m[3], 16), parseInt(m[4], 16)] : null }
+        }
+
+        // Korobeiniki, two bars to a 32-row pattern (a quarter note is four rows).
+        const A1 = 'E5 . . . B4 . C5 . D5 . . . C5 . B4 . A4 . . . A4 . C5 . E5 . . . D5 . C5 .'
+        const A2 = 'B4 . . . B4 . C5 . D5 . . . E5 . . . C5 . . . A4 . . . A4 . . . - . . .'
+        const A3 = 'D5 . . . F5 . A5 . . . G5 . F5 . E5 . C5 . E5 . . . D5 . C5 . B4 . B4 . . .'
+        const A4 = 'C5 . D5 . . . E5 . . . C5 . A4 . . . A4 . . . A4 . - . - . . . - . . .'
+        const B1 = 'E5 . . . C5 . . . D5 . . . B4 . . . C5 . . . A4 . . . A4 . . . - . . .'
+        const B2 = 'E5 . . . C5 . . . D5 . . . B4 . . . C5 . . . E5 . . . A5 . . . - . . .'
+        const B3 = 'A5 . . . G5 . . . F5 . . . E5 . . . D5 . . . C5 . . . B4 . . . - . . .'
+        const B4 = 'C5 . . . D5 . . . E5 . . . C5 . . . A4 . . . A4 . . . - . . . - . . .'
+        const INTRO = 'E5 . . . B4 . C5 . D5 . . . C5 . B4 . A4 . . . - . . . - . . . - . . .'
+        const HARM_A = 'A4 . . . . . . . A4 . . . . . . . A4 . . . . . . . A4 . . . . . . .'
+        const HARM_E = 'E4 . . . . . . . E4 . . . . . . . E4 . . . . . . . E4 . . . . . . .'
+        const ARP_AM = 'A3^37 . . . A3^37 . . . A3^37 . . . A3^37 . . . E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . .'
+        const ARP_E = 'E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . . E3^47 . . .'
+        const ARP_DM = 'D3^37 . . . D3^37 . . . D3^37 . . . D3^37 . . . A3^47 . . . A3^47 . . . A3^47 . . . A3^47 . . .'
+        const BASS_AM = 'A2 . . . E3 . . . A2 . . . E3 . . . A2 . . . E3 . . . A2 . . . E3 . . .'
+        const BASS_E = 'E2 . . . B2 . . . E2 . . . B2 . . . E2 . . . B2 . . . E2 . . . B2 . . .'
+        const BASS_DM = 'D2 . . . A2 . . . D2 . . . A2 . . . D2 . . . A2 . . . D2 . . . A2 . . .'
+        const DRUMS = 'C . 3 . 8 . 3 . C . 3 . 8 . 3 . C . 3 . 8 . 3 . C . 3 . 8 . 3 .'
+        const DRUMS_LIGHT = '3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 . 3 .'
+
+        const PAT = {
+          p1: { INTRO, A1, A2, A3, A4, B1, B2, B3, B4 },
+          p2: { rest: restPat, harmA: HARM_A, harmE: HARM_E, arpAm: ARP_AM, arpE: ARP_E, arpDm: ARP_DM, echo1: delayTrack(A1, 2) },
+          tri: { bassAm: BASS_AM, bassE: BASS_E, bassDm: BASS_DM },
+          noise: { rest: restPat, drums: DRUMS, drumsLight: DRUMS_LIGHT }
+        }
+        const SONGS = {
+          theme: { speed: 6, loop: 1, order: [
+            ['INTRO', 'rest', 'bassAm', 'rest', 0],
+            ['A1', 'arpAm', 'bassAm', 'rest', 0],
+            ['A2', 'arpE', 'bassE', 'rest', 0],
+            ['A3', 'arpDm', 'bassDm', 'rest', 0],
+            ['A4', 'arpAm', 'bassAm', 'rest', 0],
+            ['A1', 'harmA', 'bassAm', 'drumsLight', 0],
+            ['A2', 'echo1', 'bassE', 'drumsLight', 0],
+            ['A3', 'arpDm', 'bassDm', 'drumsLight', 0],
+            ['A4', 'arpAm', 'bassAm', 'drumsLight', 0],
+            ['B1', 'harmA', 'bassAm', 'drums', 0],
+            ['B2', 'harmE', 'bassE', 'drums', 0],
+            ['B3', 'arpDm', 'bassDm', 'drums', 0],
+            ['B4', 'arpAm', 'bassAm', 'drums', 0],
+            ['A1', 'arpAm', 'bassAm', 'drums', 2],
+            ['A2', 'arpE', 'bassE', 'drums', 2],
+            ['A3', 'arpDm', 'bassDm', 'drums', 2],
+            ['A4', 'arpAm', 'bassAm', 'rest', 2]
+          ] },
+          fast: { speed: 4, loop: 1, order: [
+            ['INTRO', 'rest', 'bassAm', 'drums', 0],
+            ['A1', 'arpAm', 'bassAm', 'drums', 0],
+            ['A2', 'arpE', 'bassE', 'drums', 0],
+            ['A3', 'arpDm', 'bassDm', 'drums', 0],
+            ['A4', 'arpAm', 'bassAm', 'drums', 0],
+            ['B1', 'arpAm', 'bassAm', 'drums', 0],
+            ['B2', 'arpE', 'bassE', 'drums', 0],
+            ['B3', 'arpDm', 'bassDm', 'drums', 0],
+            ['B4', 'arpAm', 'bassAm', 'drums', 0],
+            ['A1', 'harmA', 'bassAm', 'drums', 2],
+            ['A2', 'harmE', 'bassE', 'drums', 2],
+            ['A3', 'arpDm', 'bassDm', 'drums', 2],
+            ['A4', 'arpAm', 'bassAm', 'drums', 2]
+          ] }
+        }
+        const EV = {}
+        for (const ch of CH) {
+          EV[ch] = {}
+          for (const [name, s] of Object.entries(PAT[ch])) {
+            const byRow = []; let cur = null
+            tokens(s).forEach((t, row) => {
+              if (t === '.') { if (cur) cur.len++; return }
+              cur = t === '-' ? null : { t, len: 1 }
+              if (cur) byRow[row] = cur
+            })
+            EV[ch][name] = byRow
+          }
+        }
+        const mus = { pos: 0, row: 0, t: 0, on: false }
+
+        function startMusic() {
+          if (!ac || !songId) return
+          mus.pos = 0; mus.row = 0; mus.t = ac.currentTime + 0.05; mus.on = true
+        }
+        function setTrack(id) {
+          if (!ac) { pendingSong = id; return }
+          if (songId === id && mus.on) return
+          songId = id
+          startMusic()
+        }
+        function stopMusic() { mus.on = false }
+
+        const rateOf = (ch, hz) => ch === 'noise' ? hz / WAVE_SR : hz * (ch === 'tri' ? 32 : 8) * STEP / WAVE_SR
+        const bufOf = (ch, duty, mode) => ch === 'tri' ? triBuf : ch === 'noise' ? noiseBuf[mode ? 1 : 0] : pulseBuf[duty]
+
+        function voice(ch, t, dur, hz, inst, route, arp) {
+          const quant = ch === 'tri' ? triHz : ch === 'noise' ? (h => h) : pulseHz
+          if (!quant(hz)) return
+          const fs = 1 / FPS, c = COEF[ch], vib = inst.vib
+          const src = ac.createBufferSource(), g = ac.createGain()
+          src.buffer = bufOf(ch, inst.duty, inst.mode); src.loop = true
+          const frames = arp || vib ? Math.max(1, Math.ceil(dur * FPS)) : 1
+          for (let k = 0; k < frames; k++) {
+            let f = hz * 2 ** ((arp ? arp[k % 3] : 0) / 12)
+            if (vib && k >= vib.delay) f *= 2 ** (vib.depth / 1200 * Math.sin(2 * Math.PI * (k - vib.delay) / vib.speed))
+            src.playbackRate.setValueAtTime(rateOf(ch, quant(f) || quant(hz)), t + k * fs)
+          }
+          if (ch === 'tri') g.gain.setValueAtTime(15 * c * MUSIC_LEVEL, t)
+          else {
+            let v = inst.vol
+            g.gain.setValueAtTime(v * c * MUSIC_LEVEL, t)
+            if (inst.decay) for (let k = inst.decay; k * fs < dur && v > inst.floor; k += inst.decay)
+              g.gain.setValueAtTime(--v * c * MUSIC_LEVEL, t + k * fs)
+          }
+          g.gain.setValueAtTime(0, t + dur)
+          src.connect(g).connect(route)
+          src.start(t); src.stop(t + dur + 0.02)
+        }
+        function pump() {
+          if (!ac || !mus.on) return
+          const song = SONGS[songId], rowSec = song.speed / FPS
+          if (mus.t < ac.currentTime) mus.t = ac.currentTime + 0.03   // behind: resync, never burst
+          while (mus.t < ac.currentTime + 0.45) {
+            const order = song.order[mus.pos], semis = order[4]
+            CH.forEach((ch, i) => {
+              const e = EV[ch][order[i]][mus.row]
+              if (!e) return
+              const dur = e.len * rowSec
+              if (ch === 'noise') {
+                const m = /^([0-9A-F])(s?)$/.exec(e.t)
+                if (m) voice('noise', mus.t, dur, CPU / NOISE_PERIODS[parseInt(m[1], 16)], { ...INST.noise, mode: !!m[2] }, gate.noise)
+              } else {
+                const n = parseNote(e.t)
+                if (n) voice(ch, mus.t, dur, n.hz * 2 ** (semis / 12), INST[ch], gate[ch], n.arp)
+              }
+            })
+            mus.t += rowSec
+            if (++mus.row >= ROWS) { mus.row = 0; if (++mus.pos >= song.order.length) mus.pos = song.loop }
+          }
+        }
+
+        // ============================================================ Sound effects
+        const SFX = {
+          move: { ch: 'p2', duty: 2, frames: [[520, 8], [520, 5]] },
+          rotate: { ch: 'p2', duty: 2, frames: [[700, 9], [900, 6]] },
+          hold: { ch: 'p2', duty: 1, frames: [[600, 9], [760, 6]] },
+          hardDrop: { ch: 'p1', duty: 2, frames: [[320, 12], [200, 10], [120, 7]] },
+          lock: { ch: 'noise', frames: [[6, 12], [9, 6]] },
+          line: { ch: 'p2', duty: 2, frames: [[660, 10], [880, 10], [1100, 8]] },
+          tetris: { ch: 'p1', duty: 2, frames: [[660, 12], [880, 12], [1100, 12], [1320, 10], [1320, 6]] },
+          tspin: { ch: 'p2', duty: 1, frames: [[900, 12], [1200, 10], [1400, 8], [1600, 6]] },
+          over: { ch: 'p1', duty: 2, frames: [[440, 12], [370, 12], [294, 12], [196, 12], [147, 10]] }
+        }
+        function sfx(name) {
+          if (!ac) return
+          const s = SFX[name]
+          if (!s) return
+          const fs = 1 / FPS, t0 = ac.currentTime + 0.01, end = t0 + s.frames.length * fs
+          const src = ac.createBufferSource(), g = ac.createGain()
+          src.buffer = bufOf(s.ch, s.duty ?? 2, s.mode); src.loop = true
+          s.frames.forEach(([a, vol], i) => {
+            const hz = s.ch === 'noise' ? CPU / NOISE_PERIODS[a] : pulseHz(a)
+            src.playbackRate.setValueAtTime(rateOf(s.ch, hz || 1), t0 + i * fs)
+            g.gain.setValueAtTime(hz ? vol * COEF[s.ch] : 0, t0 + i * fs)
+          })
+          g.gain.setValueAtTime(0, end)
+          src.connect(g).connect(master)
+          src.start(t0); src.stop(end + 0.02)
+          gate[s.ch].gain.setValueAtTime(0, t0); gate[s.ch].gain.setValueAtTime(1, end)
+        }
+
+        let muted = false
+        function unlock() {
+          if (ac) { ac.resume(); return }
+          const AC = window.AudioContext || window.webkitAudioContext
+          if (!AC) return
+          ac = new AC()
+          master = ac.createGain(); master.gain.value = muted ? 0 : MASTER_GAIN
+          // A gentle limiter on the bus: the four channels can sum past full scale and clip.
+          const limiter = ac.createDynamicsCompressor()
+          limiter.threshold.value = -6; limiter.knee.value = 4; limiter.ratio.value = 12
+          limiter.attack.value = 0.003; limiter.release.value = 0.25
+          master.connect(limiter); limiter.connect(ac.destination)
+          gate = {}
+          for (const ch of CH) { gate[ch] = ac.createGain(); gate[ch].connect(master) }
+          const cycle = (seq, max) => {
+            const b = ac.createBuffer(1, seq.length * STEP, WAVE_SR), dd = b.getChannelData(0)
+            for (let i = 0; i < dd.length; i++) dd[i] = seq[(i / STEP) | 0] / max - 0.5
+            return b
+          }
+          pulseBuf = DUTY.map(s => cycle(s, 1))
+          triBuf = cycle(TRI_SEQ, 15)
+          noiseBuf = [0, 1].map(mode => {
+            const out = []; let s = 1
+            do { out.push(s & 1 ? -0.5 : 0.5); const fb = (s ^ (s >> (mode ? 6 : 1))) & 1; s = (s >> 1) | (fb << 14) }
+            while (s !== 1 && out.length < 32767)
+            const b = ac.createBuffer(1, out.length, WAVE_SR); b.getChannelData(0).set(out); return b
+          })
+          if (pendingSong) { songId = pendingSong; pendingSong = null }
+          if (!songId) songId = 'theme'            // title music once a key or click unlocks
+          startMusic()
+        }
+        function setMuted(m) {
+          muted = m
+          if (master) master.gain.value = m ? 0 : MASTER_GAIN
+        }
+
+        // ---- self test: every hardware limit checked at load, throws when broken ----
+        function selfTest() {
+          const ok = (c, m) => { if (!c) throw Error('NES limit broken: ' + m) }
+          ok(bgChr.length <= 256, 'background table holds 256, has ' + bgChr.length)
+          ok(sprChr.length <= 256, 'sprite table holds 256, has ' + sprChr.length)
+          for (const [tag, set] of [['BG', BGPAL], ['SPR', SPRPAL]]) {
+            ok(set.length <= 8, tag + ' has at most eight sub-palettes, has ' + set.length)
+            set.forEach((p, i) => {
+              ok(p.length === 4 && p[0] === BACKDROP, tag + i + ' is four entries starting with the backdrop')
+              for (const c of p) ok(Number.isInteger(c) && c >= 0 && c < 64 && c !== 0x0D, tag + i + ' uses a legal colour, not ' + c)
+            })
+          }
+          for (const ch of CH) for (const [name, pat] of Object.entries(PAT[ch])) {
+            const toks = tokens(pat)
+            ok(toks.length === ROWS, ch + ' pattern ' + name + ' is ' + toks.length + ' rows, must be ' + ROWS)
+            for (const t of toks) ok(t === '.' || t === '-' || (ch === 'noise' ? /^[0-9A-F]s?$/.test(t) : parseNote(t)),
+                                     ch + ' pattern ' + name + ' has a bad token ' + t)
+          }
+          for (const [id, song] of Object.entries(SONGS)) {
+            ok(song.loop >= 0 && song.loop < song.order.length, id + ' loop point is inside the order list')
+            song.order.forEach((r, i) => {
+              CH.forEach((ch, c) => ok(PAT[ch][r[c]], id + ' order row ' + i + ' names a missing ' + ch + ' pattern ' + r[c]))
+              ok(Number.isInteger(r[4]), id + ' order row ' + i + ' needs a whole-semitone transpose')
+              if (i) ok(r.some((p, c) => p !== song.order[i - 1][c]), id + ' order row ' + i + ' repeats the row before it on every channel')
+            })
+            const loopSec = (song.order.length - song.loop) * ROWS * song.speed / FPS
+            ok(loopSec >= MIN_LOOP_SECONDS, id + ' loop body is ' + loopSec.toFixed(1) + ' s, under the ' + MIN_LOOP_SECONDS + ' s floor')
+            ok(new Set(song.order.slice(song.loop).map(r => r[0])).size >= 3, id + ' loop body needs three distinct melody patterns')
+          }
+          for (const [k, s] of Object.entries(SFX)) ok(CH.includes(s.ch) && s.frames.length, 'effect ' + k)
+        }
+
+        return { render, pump, unlock, sfx, setTrack, stopMusic, setMuted, selfTest, bgCount: () => bgChr.length, sprCount: () => sprChr.length }
+      })()
+
+      class AudioSystem {
+        constructor() {
+          this.ctx = null;
+          this.master = null;
+          this.enabled = true;
+          this.musicEl = null;
+          this.musicName = '';
+          this.mode = 'classic';
+        }
+        get classic() { return this.mode === 'classic'; }
+        setMode(mode) { this.mode = mode; }
+        ensure() {
+          if (this.classic) { NES.unlock(); return; }
+          if (this.ctx) return;
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) return;
+          this.ctx = new AC();
+          this.master = this.ctx.createGain();
+          this.master.gain.value = 0.02;
+          this.master.connect(this.ctx.destination);
+        }
+        setMuted(muted) {
+          this.enabled = !muted;
+          if (this.master) this.master.gain.value = muted ? 0 : 0.02;
+          if (this.musicEl) this.musicEl.muted = muted;
+          NES.setMuted(muted);
+        }
+        setTrack(id) {                       // id: 'theme' | 'fast'
+          if (this.classic) { NES.setTrack(id); return; }
+          const name = id === 'fast' ? 'theme_fast.mp3' : 'theme.mp3';
+          if (!this.musicEl) {
+            this.musicEl = new Audio();
+            this.musicEl.loop = true;
+            this.musicEl.volume = 0.18;
+            this.musicEl.muted = !this.enabled;
+          }
+          if (this.musicName !== name) {
+            this.musicName = name;
+            this.musicEl.pause();
+            this.musicEl.src = name;
+            this.musicEl.currentTime = 0;
+          }
+          const p = this.musicEl.play();
+          if (p && p.catch) p.catch(() => {});
+        }
+        stopMusic() {
+          NES.stopMusic();
+          if (this.musicEl) this.musicEl.pause();
+          this.musicName = '';
+        }
+        beep(freq = 440, duration = 0.04, type = 'square', volume = 0.3) {
+          if (!this.enabled || this.classic) return;
+          this.ensure();
+          if (!this.ctx || !this.master) return;
+          const now = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, now);
+          gain.gain.setValueAtTime(volume, now);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+          osc.connect(gain);
+          gain.connect(this.master);
+          osc.start(now);
+          osc.stop(now + duration);
+        }
+        move() { if (this.classic) NES.sfx('move'); else this.beep(420, 0.03, 'square', 0.35); }
+        rotate() { if (this.classic) NES.sfx('rotate'); else this.beep(640, 0.03, 'square', 0.35); }
+        hold() { if (this.classic) NES.sfx('hold'); else this.beep(520, 0.05, 'square', 0.4); }
+        hardDrop() {
+          if (this.classic) { NES.sfx('hardDrop'); return; }
+          this.beep(320, 0.04, 'square', 0.5);
+          setTimeout(() => this.beep(160, 0.06, 'square', 0.45), 30);
+        }
+        tspin() {
+          if (this.classic) { NES.sfx('tspin'); return; }
+          this.beep(760, 0.05, 'square', 0.45);
+          setTimeout(() => this.beep(1140, 0.09, 'square', 0.5), 50);
+        }
+        lock() { if (this.classic) NES.sfx('lock'); else this.beep(180, 0.05, 'square', 0.45); }
+        line() { if (this.classic) NES.sfx('line'); else this.beep(880, 0.06, 'square', 0.45); }
+        tetris() {
+          if (this.classic) { NES.sfx('tetris'); return; }
+          this.beep(660, 0.06, 'square', 0.4);
+          setTimeout(() => this.beep(880, 0.08, 'square', 0.45), 45);
+          setTimeout(() => this.beep(1100, 0.10, 'square', 0.5), 95);
+        }
+        over() {
+          if (this.classic) { NES.sfx('over'); return; }
+          this.beep(220, 0.12, 'square', 0.5);
+          setTimeout(() => this.beep(196, 0.12, 'square', 0.45), 110);
+          setTimeout(() => this.beep(164, 0.16, 'square', 0.45), 220);
+        }
+      }
+
+      class Piece {
+        constructor(type, x = 4, y = 0, rot = 0) {
+          this.type = type;
+          this.x = x;
+          this.y = y;
+          this.rot = rot & 3;
+        }
+        clone() {
+          return new Piece(this.type, this.x, this.y, this.rot);
+        }
+        cells(rot = this.rot, x = this.x, y = this.y) {
+          return PIECES[this.type][rot & 3].map(([cx, cy]) => ({ x: x + cx, y: y + cy }));
+        }
+      }
+
+      class Board {
+        constructor(w, h) {
+          this.w = w;
+          this.h = h;
+          this.grid = Array.from({ length: h }, () => Array(w).fill(null));
+        }
+        reset() {
+          for (let y = 0; y < this.h; y++) this.grid[y].fill(null);
+        }
+        isInside(x, y) {
+          return x >= 0 && x < this.w && y < this.h;
+        }
+        isEmpty(x, y) {
+          if (y < 0) return true; // hidden spawn space above visible field
+          return this.isInside(x, y) && this.grid[y][x] === null;
+        }
+        occupied(x, y) {
+          if (x < 0 || x >= this.w || y >= this.h) return true; // walls and floor count
+          if (y < 0) return false;
+          return this.grid[y][x] !== null;
+        }
+        collides(piece, x = piece.x, y = piece.y, rot = piece.rot) {
+          const cells = piece.cells(rot, x, y);
+          for (const c of cells) {
+            if (c.x < 0 || c.x >= this.w || c.y >= this.h) return true;
+            if (c.y >= 0 && this.grid[c.y][c.x] !== null) return true;
+          }
+          return false;
+        }
+        place(piece) {
+          for (const c of piece.cells()) {
+            if (c.y >= 0 && c.y < this.h && c.x >= 0 && c.x < this.w) {
+              this.grid[c.y][c.x] = piece.type;
+            }
+          }
+        }
+        fullRows() {
+          const rows = [];
+          for (let y = 0; y < this.h; y++) {
+            if (this.grid[y].every(Boolean)) rows.push(y);
+          }
+          return rows;
+        }
+        clearRows(rows) {
+          rows.sort((a, b) => a - b);
+          for (const y of rows) {
+            this.grid.splice(y, 1);
+            this.grid.unshift(Array(this.w).fill(null));
+          }
+        }
+      }
+
+      class Game {
+        constructor() {
+          this.audio = new AudioSystem();
+          this.board = new Board(BOARD_W, BOARD_H);
+          this.state = 'start'; // start, playing, lineclear, gameover
+          this.frame = 0;
+          this.accum = 0;
+          this.lastTs = 0;
+          this.score = 0;
+          this.lines = 0;
+          this.level = 0;
+          this.startLevel = 0;
+          this.piece = null;
+          this.nextType = null;
+          this.prevType = null;
+          this.areFrames = 0;
+          this.gravityCounter = 0;
+          this.softDropCellsThisPiece = 0;
+          this.lineClearRows = [];
+          this.lineClearStep = 0;
+          this.lineClearStartedAtFrame = 0;
+          this.pendingSpawn = false;
+          this.muted = false;
+          this.holdType = null;
+          this.holdUsed = false;
+          this.lastMoveWasRotation = false;
+          this.pendingTSpin = null;
+          this.banner = '';
+          this.bannerFrames = 0;
+
+          // NES-like directional input state and DAS timing.
+          this.keysHeld = { left: false, right: false, down: false };
+          this.dasDirection = 0; // -1 left, 1 right
+          this.dasCounter = 0;
+          this.lastPressedDirection = 0;
+
+          this.mode = 'classic'; // the site opens on NES Classic
+          this.tvCanvas = document.getElementById('tv');
+          this.modeBtn = document.getElementById('mode');
+          this.modeBtn.addEventListener('click', () => this.toggleMode());
+          this.audio.setMode(this.mode);
+          this.applyMode();
+
+          this.bindEvents();
+          this.loop = this.loop.bind(this);
+          requestAnimationFrame(this.loop);
+        }
+
+        bindEvents() {
+          this.input = this.createInput();
+
+          // Only the meta keys the pad does not own stay on the raw keyboard.
+          window.addEventListener('keydown', (e) => {
+            if (e.key === 'm' || e.key === 'M') {
+              this.muted = !this.muted;
+              this.audio.setMuted(this.muted);
+            } else if (e.key === 'n' || e.key === 'N') {
+              this.toggleMode();
+            }
+          });
+        }
+
+        // One input deck from motor.js: keyboard, an on-screen touch pad and the TOUCH/KEYS
+        // setting. Falls back to a plain keyboard pad when motor.js is not present.
+        createInput() {
+          const KEYS = { ArrowLeft: 'L', ArrowRight: 'R', ArrowDown: 'D', ArrowUp: 'B',
+                         KeyA: 'L', KeyD: 'R', KeyS: 'D', KeyW: 'B',
+                         Space: 'A', KeyZ: 'A', KeyX: 'B',
+                         KeyC: 'SELECT', ShiftLeft: 'SELECT', ShiftRight: 'SELECT',
+                         Enter: 'START', KeyP: 'START', NumpadEnter: 'START' };
+          if (window.MOTCH) {
+            return MOTCH.create({
+              slot: 'tetro', canvas: '#tv', unlock: () => this.audio.ensure(), keys: KEYS,
+              buttons: {
+                left: [{ b: 'L', label: 'LEFT' }, { b: 'D', label: 'DOWN' }, { b: 'R', label: 'RIGHT' }],
+                right: [{ b: 'B', label: 'ROT' }, { b: 'A', label: 'DROP' },
+                        { b: 'SELECT', label: 'HOLD' }, { b: 'START', label: 'START' }]
+              }
+            });
+          }
+          const pad = {}, was = {};
+          window.addEventListener('keydown', (e) => { const b = KEYS[e.code]; if (!b) return; e.preventDefault(); this.audio.ensure(); pad[b] = 1; });
+          window.addEventListener('keyup', (e) => { const b = KEYS[e.code]; if (b) pad[b] = 0; });
+          return { pad, hit: b => pad[b] && !was[b], sync: () => Object.assign(was, pad) };
+        }
+
+        handleInput() {
+          const pad = this.input.pad;
+          if (this.state === 'start' || this.state === 'gameover') {
+            if (this.input.hit('START') || this.input.hit('A')) this.startGame();
+            return;
+          }
+          if (this.state !== 'playing') return;
+          if (this.input.hit('L')) { this.lastPressedDirection = -1; this.dasDirection = -1; this.dasCounter = 0; this.tryShift(-1, true); }
+          if (this.input.hit('R')) { this.lastPressedDirection = 1; this.dasDirection = 1; this.dasCounter = 0; this.tryShift(1, true); }
+          if (this.input.hit('B')) this.tryRotate();
+          if (this.input.hit('A')) this.hardDrop();
+          if (this.input.hit('SELECT')) this.hold();
+          this.keysHeld.left = !!pad.L;
+          this.keysHeld.right = !!pad.R;
+          this.keysHeld.down = !!pad.D;
+        }
+
+        toggleMode() { this.setMode(this.mode === 'classic' ? 'new' : 'classic'); }
+
+        setMode(mode) {
+          if (this.mode === mode) return;
+          this.mode = mode;
+          this.audio.setMode(mode);
+          this.audio.ensure();
+          this.audio.stopMusic();
+          this.audio.setTrack(this.musicForLevel(this.level));
+          this.applyMode();
+        }
+
+        applyMode() {
+          const classic = this.mode === 'classic';
+          canvas.style.display = classic ? 'none' : '';
+          this.tvCanvas.style.display = classic ? 'block' : 'none';
+          this.modeBtn.textContent = classic ? 'NES CLASSIC' : 'NEW';
+        }
+
+        // Pose a representative mid-game board so build.js can shoot a gameplay thumbnail (the
+        // cart is opened with #shot). Frozen, so the capture window cannot change the frame.
+        photo() {
+          this.startGame();
+          const types = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+          for (let x = 0; x < BOARD_W; x++) this.board.grid[BOARD_H - 1][x] = types[x % 7];
+          for (let x = 0; x < 8; x++) this.board.grid[BOARD_H - 2][x] = types[(x + 3) % 7];
+          this.board.grid[BOARD_H - 3][2] = 'L';
+          this.board.grid[BOARD_H - 3][7] = 'J';
+          this.piece = new Piece('S', 3, 8, 0);
+          this.nextType = 'T';
+          this.holdType = 'I';
+          this.score = 12340; this.lines = 27; this.level = 4; this.state = 'playing';
+          this.banner = 'T-SPIN'; this.bannerFrames = 9999;
+          this.frozen = true;
+          if (document.body) document.body.classList.add('shot');
+        }
+
+        startGame() {
+          this.audio.ensure();
+          this.board.reset();
+          this.state = 'playing';
+          this.frame = 0;
+          this.score = 0;
+          this.lines = 0;
+          this.level = this.startLevel;
+          this.audio.setTrack(this.musicForLevel(this.level));
+          this.prevType = null;
+          this.nextType = this.rollPiece();
+          this.piece = null;
+          this.areFrames = 0;
+          this.gravityCounter = 0;
+          this.softDropCellsThisPiece = 0;
+          this.lineClearRows = [];
+          this.lineClearStep = 0;
+          this.pendingSpawn = false;
+          this.holdType = null;
+          this.holdUsed = false;
+          this.lastMoveWasRotation = false;
+          this.pendingTSpin = null;
+          this.banner = '';
+          this.bannerFrames = 0;
+          this.dasDirection = 0;
+          this.dasCounter = 0;
+          this.keysHeld.left = this.keysHeld.right = this.keysHeld.down = false;
+          this.spawnPiece();
+        }
+
+        gravityFrames() {
+          return GRAVITY_TABLE[Math.min(this.level, GRAVITY_TABLE.length - 1)];
+        }
+
+        effectiveDropFrames() {
+          const g = this.gravityFrames();
+          if (this.keysHeld.down) return Math.min(g, 2); // NES soft drop is 1/2G
+          return g;
+        }
+
+        updateLevel() {
+          this.level = Math.floor(this.lines / 10);
+          if (this.state !== 'start') this.audio.setTrack(this.musicForLevel(this.level));
+        }
+
+        musicForLevel(level) {
+          return level >= 5 ? 'fast' : 'theme';
+        }
+
+        saveScore() {
+          try {
+            const level = this.level + 1;
+            const top = JSON.parse(localStorage.getItem('tetroTop') || 'null') || { score: 0, level: 1 };
+            if (this.score > (top.score | 0)) { top.score = this.score; top.level = level; }
+            localStorage.setItem('tetroTop', JSON.stringify(top));
+            localStorage.setItem('tetroRun', JSON.stringify({ score: this.score, level, at: Date.now() }));
+          } catch (err) { /* private mode: nothing to save, nothing to crash */ }
+        }
+
+        rollPiece() {
+          // NES randomizer: first roll 0..7, reject 7 and direct repeat; else second roll 0..6.
+          const roll1 = Math.floor(Math.random() * 8);
+          if (roll1 !== 7 && PIECE_TYPES[roll1] !== this.prevType) {
+            return PIECE_TYPES[roll1];
+          }
+          const roll2 = Math.floor(Math.random() * 7);
+          return PIECE_TYPES[roll2];
+        }
+
+        spawnPiece() {
+          this.holdUsed = false;
+          this.nextPiece();
+        }
+
+        nextPiece() {
+          const type = this.nextType || this.rollPiece();
+          this.nextType = this.rollPiece();
+          this.prevType = type;
+          this.setPiece(type);
+        }
+
+        setPiece(type) {
+          const piece = new Piece(type, 4, 1, 0); // spawn slightly above visible field
+          // Minor spawn adjustments for flatter NES feel.
+          if (type === 'I') piece.y = 0;
+          if (type === 'O') piece.y = 0;
+          this.piece = piece;
+          this.gravityCounter = 0;
+          this.softDropCellsThisPiece = 0;
+          this.lastMoveWasRotation = false;
+
+          if (this.board.collides(this.piece)) {
+            this.state = 'gameover';
+            this.audio.over();
+            this.audio.stopMusic();
+            this.saveScore();
+          }
+        }
+
+        hardDrop() {
+          if (!this.piece) return;
+          let cells = 0;
+          while (!this.board.collides(this.piece, this.piece.x, this.piece.y + 1, this.piece.rot)) {
+            this.piece.y++;
+            cells++;
+          }
+          this.score = Math.min(999999, this.score + cells * 2);
+          this.lastMoveWasRotation = false;
+          this.audio.hardDrop();
+          this.lockPiece();
+        }
+
+        hold() {
+          if (this.state !== 'playing' || !this.piece || this.holdUsed) return;
+          const current = this.piece.type;
+          if (this.holdType) {
+            const swap = this.holdType;
+            this.holdType = current;
+            this.setPiece(swap);
+          } else {
+            this.holdType = current;
+            this.nextPiece();
+          }
+          this.holdUsed = true;
+          this.audio.hold();
+        }
+
+        computeARE(piece) {
+          const bottom = Math.max(...piece.cells().map(c => c.y));
+          if (bottom >= 18) return 10;
+          if (bottom >= 14) return 12;
+          if (bottom >= 10) return 14;
+          if (bottom >= 6) return 16;
+          return 18;
+        }
+
+        tryShift(dir, tap = false) {
+          if (!this.piece) return false;
+
+          // Choose active direction by most recently pressed key when both are held.
+          this.dasDirection = dir;
+          this.dasCounter = 0;
+
+          const nx = this.piece.x + dir;
+          if (!this.board.collides(this.piece, nx, this.piece.y, this.piece.rot)) {
+            this.piece.x = nx;
+            this.lastMoveWasRotation = false;
+            this.audio.move();
+            return true;
+          }
+
+          // NES sets DAS to charged when a tap is blocked.
+          if (tap) this.dasCounter = 16;
+          return false;
+        }
+
+        updateDAS() {
+          if (!this.piece) return;
+          const left = this.keysHeld.left;
+          const right = this.keysHeld.right;
+          if (!left && !right) {
+            this.dasDirection = 0;
+            return;
+          }
+
+          let dir = 0;
+          if (left && right) {
+            dir = this.lastPressedDirection || this.dasDirection || 1;
+          } else {
+            dir = left ? -1 : 1;
+          }
+
+          if (dir !== this.dasDirection) {
+            this.dasDirection = dir;
+            this.dasCounter = 0;
+            return;
+          }
+
+          this.dasCounter++;
+          if (this.dasCounter >= 16) {
+            const repeatIndex = this.dasCounter - 16;
+            if (repeatIndex % 6 === 0) {
+              const nx = this.piece.x + dir;
+              if (!this.board.collides(this.piece, nx, this.piece.y, this.piece.rot)) {
+                this.piece.x = nx;
+                this.audio.move();
+              }
+            }
+          }
+        }
+
+        tryRotate() {
+          if (!this.piece) return false;
+          if (this.piece.type === 'O') return false;
+          const nr = (this.piece.rot + 1) & 3;
+          const kicks = KICKS[this.piece.type === 'I' ? 'I' : 'JLSTZ'][this.piece.rot];
+          for (const [dx, dy] of kicks) {
+            const nx = this.piece.x + dx;
+            const ny = this.piece.y + dy;
+            if (!this.board.collides(this.piece, nx, ny, nr)) {
+              this.piece.x = nx;
+              this.piece.y = ny;
+              this.piece.rot = nr;
+              this.lastMoveWasRotation = true;
+              this.audio.rotate();
+              return true;
+            }
+          }
+          return false;
+        }
+
+        stepDown(bySoftDrop = false) {
+          if (!this.piece) return false;
+          const ny = this.piece.y + 1;
+          if (!this.board.collides(this.piece, this.piece.x, ny, this.piece.rot)) {
+            this.piece.y = ny;
+            this.lastMoveWasRotation = false;
+            if (bySoftDrop && this.softDropCellsThisPiece < 20) {
+              this.score = Math.min(999999, this.score + 1);
+              this.softDropCellsThisPiece++;
+            }
+
+            // No lock delay: if the piece is now resting on something, lock immediately.
+            if (this.board.collides(this.piece, this.piece.x, this.piece.y + 1, this.piece.rot)) {
+              this.lockPiece();
+              return false;
+            }
+            return true;
+          }
+          this.lockPiece();
+          return false;
+        }
+
+        lockPiece() {
+          if (!this.piece) return;
+          const spin = this.detectTSpin(this.piece);
+          this.board.place(this.piece);
+          this.audio.lock();
+          this.lastMoveWasRotation = false;
+          const rows = this.board.fullRows();
+          const lockedPiece = this.piece;
+          this.piece = null;
+
+          if (rows.length > 0) {
+            this.pendingTSpin = spin;
+            this.lineClearRows = rows;
+            this.state = 'lineclear';
+            this.lineClearStep = 0;
+            this.lineClearStartedAtFrame = this.frame;
+          } else {
+            if (spin) {
+              const table = spin === 'full' ? TSPIN_SCORE : TSPIN_MINI_SCORE;
+              this.score = Math.min(999999, this.score + table[0] * (this.level + 1));
+              this.setBanner(spin === 'full' ? 'T-SPIN' : 'T-SPIN MINI');
+              this.audio.tspin();
+            }
+            this.areFrames = this.computeARE(lockedPiece);
+            this.pendingSpawn = true;
+          }
+        }
+
+        detectTSpin(piece) {
+          if (piece.type !== 'T' || !this.lastMoveWasRotation) return null;
+          let corners = 0;
+          for (const [dx, dy] of CORNERS) {
+            if (this.board.occupied(piece.x + dx, piece.y + dy)) corners++;
+          }
+          if (corners < 3) return null;
+          let front = 0;
+          for (const [dx, dy] of FRONT_CORNERS[piece.rot]) {
+            if (this.board.occupied(piece.x + dx, piece.y + dy)) front++;
+          }
+          return front === 2 ? 'full' : 'mini';
+        }
+
+        setBanner(text) {
+          this.banner = text;
+          this.bannerFrames = 60;
+        }
+
+        finishLineClear() {
+          const count = this.lineClearRows.length;
+          const spin = this.pendingTSpin;
+          this.pendingTSpin = null;
+          let gained = SCORE_TABLE[count] * (this.level + 1);
+          if (spin) {
+            const table = spin === 'full' ? TSPIN_SCORE : TSPIN_MINI_SCORE;
+            gained = table[Math.min(count, 3)] * (this.level + 1);
+            this.setBanner(spin === 'full' ? 'T-SPIN' : 'T-SPIN MINI');
+            this.audio.tspin();
+          } else if (count === 4) {
+            this.audio.tetris();
+          } else {
+            this.audio.line();
+          }
+          this.board.clearRows(this.lineClearRows);
+          this.lines += count;
+          this.score = Math.min(999999, this.score + gained);
+          this.updateLevel();
+          this.lineClearRows = [];
+          this.state = 'playing';
+          this.areFrames = 10; // after line clear, approximate spawn delay before next piece
+          this.pendingSpawn = true;
+        }
+
+        update() {
+          this.frame++;
+          if (this.frozen) return;          // posed for the hub thumbnail
+          if (this.bannerFrames > 0) this.bannerFrames--;
+          this.handleInput();
+          this.step();
+          this.input.sync();
+        }
+
+        step() {
+          if (this.state === 'start' || this.state === 'gameover') return;
+
+          if (this.state === 'lineclear') {
+            // NES clears 5 animation steps, each advancing on frames where globalFrame % 4 === 0.
+            if (this.frame % 4 === 0) {
+              this.lineClearStep++;
+              if (this.lineClearStep >= 5) {
+                this.finishLineClear();
+              }
+            }
+            return;
+          }
+
+          if (this.areFrames > 0) {
+            this.areFrames--;
+            if (this.areFrames === 0 && this.pendingSpawn) {
+              this.pendingSpawn = false;
+              this.spawnPiece();
+            }
+            return;
+          }
+
+          if (!this.piece) return;
+
+          this.updateDAS();
+
+          this.gravityCounter++;
+          const dropFrames = this.effectiveDropFrames();
+          if (this.gravityCounter >= dropFrames) {
+            this.gravityCounter = 0;
+            this.stepDown(this.keysHeld.down);
+          }
+        }
+
+        drawPixelText(text, x, y, size = 20, align = 'left', color = '#e8e8e8') {
+          ctx.save();
+          ctx.fillStyle = color;
+          ctx.font = `${size}px Courier New, monospace`;
+          ctx.textAlign = align;
+          ctx.textBaseline = 'top';
+          ctx.fillText(text, x, y);
+          ctx.restore();
+        }
+
+        drawBox(x, y, w, h, title = null) {
+          ctx.save();
+          ctx.fillStyle = '#070a10';
+          ctx.fillRect(x, y, w, h);
+          ctx.fillStyle = '#8a8a8a'; ctx.fillRect(x, y, w, 3); ctx.fillRect(x, y, 3, h);
+          ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x, y + h - 3, w, 3); ctx.fillRect(x + w - 3, y, 3, h);
+          if (title) {
+            this.drawPixelText(title, x + 8, y - 18, 18, 'left', '#d8d8d8');
+          }
+          ctx.restore();
+        }
+
+        drawCell(x, y, color) {
+          ctx.drawImage(blockTile(color), x, y);
+        }
+
+        drawBoard() {
+          const fx = BOARD_X - 8, fy = BOARD_Y - 8;
+          const fw = BOARD_W * TILE + 16, fh = VISIBLE_H * TILE + 16;
+
+          // cabinet frame, lit top-left and shadowed bottom-right
+          ctx.fillStyle = '#050505'; ctx.fillRect(fx, fy, fw, fh);
+          ctx.fillStyle = '#8a8a8a'; ctx.fillRect(fx, fy, fw, 4); ctx.fillRect(fx, fy, 4, fh);
+          ctx.fillStyle = '#1a1a1a'; ctx.fillRect(fx, fy + fh - 4, fw, 4); ctx.fillRect(fx + fw - 4, fy, 4, fh);
+
+          // well floor: a gradient dropping into depth, with a grid receding upward
+          const wg = ctx.createLinearGradient(0, BOARD_Y, 0, BOARD_Y + VISIBLE_H * TILE);
+          wg.addColorStop(0, '#0b0e18'); wg.addColorStop(1, '#010103');
+          ctx.fillStyle = wg; ctx.fillRect(BOARD_X, BOARD_Y, BOARD_W * TILE, VISIBLE_H * TILE);
+          ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+          ctx.lineWidth = 1;
+          for (let x = 0; x <= BOARD_W; x++) {
+            ctx.beginPath();
+            ctx.moveTo(BOARD_X + x * TILE + 0.5, BOARD_Y + 0.5);
+            ctx.lineTo(BOARD_X + x * TILE + 0.5, BOARD_Y + VISIBLE_H * TILE + 0.5);
+            ctx.stroke();
+          }
+          for (let y = 0; y <= VISIBLE_H; y++) {
+            ctx.beginPath();
+            ctx.moveTo(BOARD_X + 0.5, BOARD_Y + y * TILE + 0.5);
+            ctx.lineTo(BOARD_X + BOARD_W * TILE + 0.5, BOARD_Y + y * TILE + 0.5);
+            ctx.stroke();
+          }
+
+          // settled blocks
+          for (let y = HIDDEN_H; y < BOARD_H; y++) {
+            for (let x = 0; x < BOARD_W; x++) {
+              const cell = this.board.grid[y][x];
+              if (!cell) continue;
+              let color = COLORS[cell] || '#999';
+              if (this.state === 'lineclear' && this.lineClearRows.includes(y)) {
+                // 5-step center-out wipe to mimic NES line clear timing/shape.
+                const cx = x < 5 ? x : 9 - x;
+                if (cx < this.lineClearStep) color = '#000';
+              }
+              this.drawCell(BOARD_X + x * TILE, BOARD_Y + (y - HIDDEN_H) * TILE, color);
+            }
+          }
+
+          // ghost landing, cast shadow, then the active piece floating above the floor
+          if (this.piece && this.state === 'playing') {
+            let landY = this.piece.y;
+            while (!this.board.collides(this.piece, this.piece.x, landY + 1, this.piece.rot)) landY++;
+            const color = COLORS[this.piece.type];
+            if (landY !== this.piece.y) {
+              ctx.save(); ctx.globalAlpha = 0.22;
+              for (const c of this.piece.cells(this.piece.rot, this.piece.x, landY)) {
+                if (c.y < HIDDEN_H) continue;
+                this.drawCell(BOARD_X + c.x * TILE, BOARD_Y + (c.y - HIDDEN_H) * TILE, color);
+              }
+              ctx.restore();
+            }
+            ctx.save(); ctx.globalAlpha = 0.3; ctx.fillStyle = '#000';
+            for (const c of this.piece.cells()) {
+              if (c.y < HIDDEN_H) continue;
+              ctx.fillRect(BOARD_X + c.x * TILE + 4, BOARD_Y + (c.y - HIDDEN_H) * TILE + 5, TILE, TILE);
+            }
+            ctx.restore();
+            for (const c of this.piece.cells()) {
+              if (c.y < HIDDEN_H) continue;
+              this.drawCell(BOARD_X + c.x * TILE, BOARD_Y + (c.y - HIDDEN_H) * TILE, color);
+            }
+          }
+        }
+
+        drawPreview(type, x, y) {
+          this.drawBox(x, y, 112, 112, 'NEXT');
+          this.drawPieceInBox(type, x, y, 112, 112);
+        }
+
+        drawPieceInBox(type, x, y, w, h) {
+          if (!type) return;
+          const cells = PIECES[type][0];
+          // normalize shape into the box
+          const xs = cells.map(c => c[0]);
+          const ys = cells.map(c => c[1]);
+          const minX = Math.min(...xs);
+          const maxX = Math.max(...xs);
+          const minY = Math.min(...ys);
+          const maxY = Math.max(...ys);
+          const shapeW = maxX - minX + 1;
+          const shapeH = maxY - minY + 1;
+          const ox = x + Math.floor((w - shapeW * TILE) / 2);
+          const oy = y + Math.floor((h - shapeH * TILE) / 2);
+          for (const [cx, cy] of cells) {
+            this.drawCell(ox + (cx - minX) * TILE, oy + (cy - minY) * TILE, COLORS[type]);
+          }
+        }
+
+        drawPanels() {
+          this.drawBox(PANEL_X, 72, PANEL_W, 120, 'SCORE');
+          this.drawPixelText(pad(this.score, 6), PANEL_X + PANEL_W - 10, 112, 28, 'right');
+
+          this.drawBox(PANEL_X, 224, PANEL_W, 72, 'LINES');
+          this.drawPixelText(pad(this.lines, 3), PANEL_X + PANEL_W - 10, 252, 28, 'right');
+
+          this.drawBox(PANEL_X, 320, PANEL_W, 72, 'LEVEL');
+          this.drawPixelText(pad(this.level, 2), PANEL_X + PANEL_W - 10, 348, 28, 'right');
+
+          this.drawPreview(this.nextType, PANEL_X + 24, 416);
+
+          this.drawBox(LEFT_PANEL_X, 72, LEFT_PANEL_W, 120, 'HOLD');
+          this.drawPieceInBox(this.holdType, LEFT_PANEL_X, 72, LEFT_PANEL_W, 120);
+
+          this.drawBox(LEFT_PANEL_X, 224, LEFT_PANEL_W, 200, 'CONTROLS');
+          this.drawPixelText('L/R MOVE', LEFT_PANEL_X + 14, 252, 18, 'left', '#d8d8d8');
+          this.drawPixelText('DOWN DROP', LEFT_PANEL_X + 14, 280, 18, 'left', '#d8d8d8');
+          this.drawPixelText('SPACE DROP', LEFT_PANEL_X + 14, 308, 18, 'left', '#d8d8d8');
+          this.drawPixelText('UP ROTATE', LEFT_PANEL_X + 14, 336, 18, 'left', '#d8d8d8');
+          this.drawPixelText('C/SHIFT HOLD', LEFT_PANEL_X + 14, 364, 18, 'left', '#d8d8d8');
+          this.drawPixelText('M MUTE', LEFT_PANEL_X + 14, 392, 18, 'left', '#d8d8d8');
+        }
+
+        drawTitle() {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          this.drawPixelText('TETRO', canvas.width / 2, 120, 64, 'center', '#f0f0f0');
+          this.drawPixelText('NES-STYLE TETRIS', canvas.width / 2, 200, 24, 'center', '#a8a8a8');
+
+          this.drawBox(184, 258, 400, 140);
+          this.drawPixelText('PRESS ENTER OR SPACE', canvas.width / 2, 290, 28, 'center');
+          this.drawPixelText('TO BEGIN', canvas.width / 2, 326, 28, 'center');
+          this.drawPixelText('ARROWS TO PLAY', canvas.width / 2, 362, 20, 'center', '#b8b8b8');
+        }
+
+        drawGameOver() {
+          ctx.fillStyle = 'rgba(0,0,0,0.68)';
+          ctx.fillRect(BOARD_X, BOARD_Y + 120, BOARD_W * TILE, 120);
+          this.drawPixelText('GAME OVER', BOARD_X + (BOARD_W * TILE) / 2, BOARD_Y + 144, 36, 'center', '#fff');
+          this.drawPixelText('PRESS ENTER OR SPACE', BOARD_X + (BOARD_W * TILE) / 2, BOARD_Y + 186, 20, 'center', '#d0d0d0');
+        }
+
+        render() {
+          if (this.mode === 'classic') { NES.render(this); return; }
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          if (this.state === 'start') {
+            this.drawTitle();
+            return;
+          }
+
+          this.drawPixelText('TOP', PANEL_X + PANEL_W / 2, 18, 18, 'center', '#a8a8a8');
+          this.drawPixelText('TETRO', canvas.width / 2, 12, 20, 'center', '#b8b8b8');
+
+          this.drawBoard();
+          this.drawPanels();
+
+          if (this.bannerFrames > 0) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, this.bannerFrames / 20);
+            this.drawPixelText(this.banner, BOARD_X + (BOARD_W * TILE) / 2, BOARD_Y + 190, 34, 'center', '#f8b800');
+            ctx.restore();
+          }
+
+          if (this.state === 'gameover') {
+            this.drawGameOver();
+          }
+        }
+
+        loop(ts) {
+          if (!this.lastTs) this.lastTs = ts;
+          let dt = ts - this.lastTs;
+          this.lastTs = ts;
+          this.accum += dt;
+
+          // process fixed frames to reproduce frame-based gravity / DAS timing
+          while (this.accum >= FRAME_MS) {
+            this.update();
+            this.accum -= FRAME_MS;
+          }
+
+          if (this.mode === 'classic') NES.pump();
+          this.render();
+          requestAnimationFrame(this.loop);
+        }
+      }
+
+      function selfTest() {
+        NES.selfTest();
+        for (const key of ['JLSTZ', 'I']) {
+          if (KICKS[key].length !== 4) throw new Error('kick table ' + key + ' needs 4 rotations');
+          for (const row of KICKS[key]) {
+            if (row.length !== 5 || row[0][0] !== 0 || row[0][1] !== 0) {
+              throw new Error('kick row malformed in ' + key);
+            }
+          }
+        }
+
+        const game = Object.create(Game.prototype);
+        game.board = new Board(10, 22);
+        game.audio = { hold() {}, over() {}, stopMusic() {}, setTrack() {}, rotate() {}, move() {}, lock() {}, hardDrop() {} };
+
+        // A blocked rotation must kick the piece aside instead of failing. This is the
+        // move that makes a T-spin reachable.
+        game.board.grid[4][1] = 'I';
+        game.piece = new Piece('T', 1, 5, 0);
+        if (!game.tryRotate()) throw new Error('rotation with a kick must succeed');
+        if (game.piece.rot !== 1 || game.piece.x !== 0) throw new Error('rotation did not use the wall kick');
+        game.board.grid[4][1] = null;
+        game.piece = null;
+
+        // A T pinned in the bottom-left corner has three occupied corners with both
+        // front corners filled, so a rotation into it scores a full T-spin.
+        const t = new Piece('T', 0, 21, 0);
+        game.lastMoveWasRotation = true;
+        if (game.detectTSpin(t) !== 'full') throw new Error('full T-spin not detected');
+        game.lastMoveWasRotation = false;
+        if (game.detectTSpin(t) !== null) throw new Error('T-spin must require a rotation');
+
+        // Hold stashes the active piece, pulls the next one, and locks until spawn.
+        game.state = 'playing';
+        game.holdType = null;
+        game.holdUsed = false;
+        game.nextType = 'I';
+        game.prevType = null;
+        game.gravityCounter = 0;
+        game.softDropCellsThisPiece = 0;
+        game.piece = new Piece('T', 4, 1, 0);
+        game.hold();
+        if (game.holdType !== 'T') throw new Error('hold did not stash the piece');
+        if (game.piece.type !== 'I') throw new Error('hold did not pull the next piece');
+        if (!game.holdUsed) throw new Error('hold must lock until the next spawn');
+        game.hold();
+        if (game.piece.type !== 'I') throw new Error('second hold in one spawn must be ignored');
+
+        // Hard drop falls to the floor, scores 2 a cell, and locks immediately.
+        game.board.reset();
+        game.piece = new Piece('I', 4, 1, 0);
+        game.score = 0;
+        game.hardDrop();
+        if (game.piece !== null) throw new Error('hard drop must lock the piece');
+        if (game.board.grid[21][4] == null) throw new Error('hard drop must land on the floor');
+        if (game.score !== 40) throw new Error('hard drop must score 2 per cell');
+      }
+
+      window.NES = { selfTest, Game, Board, Piece, KICKS, classic: NES };
+      selfTest();
+      window.NES.game = new Game();
+      if (typeof location !== 'undefined' && location.hash === '#shot') window.NES.game.photo();
+    })();
+  </script>
+</body>
+</html>

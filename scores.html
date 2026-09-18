@@ -124,11 +124,12 @@ const ago = t => {
 }
 
 // Each cart writes its own save under its own key, and each board reads only its own rows out of
-// the shared table. Snake's mode column holds a game mode; Galactica's holds a stage, which is
-// what the two filters below key off. Neither board can show the other's runs.
+// the shared table. The mode column is the fence between boards: Snake writes one of its four mode
+// names, Galactica a stage, Tetro a level. Change the filters together with the carts or the
+// boards start showing each other's runs.
 const BOARDS = [
   {
-    key: 'snake', title: 'Snake', game: 'snake.html', filter: '&mode=not.like.STAGE*',
+    key: 'snake', title: 'Snake', game: 'snake.html', filter: '&mode=in.(CLASSIC,WRAP,MAZE,SPRINT)',
     runs(){
       const run = read('snakeRun'), tops = read('snakeTops', {}) || {}, out = []
       if (run && run.score >= 1) {
@@ -155,6 +156,21 @@ const BOARDS = [
         out.push({label: 'BEST - STAGE ' + top.stage, score: top.score, mode: 'STAGE ' + top.stage})
       }
       return out
+    }
+  },
+  {
+    key: 'tetro', title: 'Tetro', game: 'tetro.html', filter: '&mode=like.LEVEL*',
+    runs(){
+      const run = read('tetroRun'), top = read('tetroTop', {score: 0, level: 1}) || {score: 0, level: 1}
+      const out = []
+      if (run && run.score >= 1) {
+        out.push({label: 'LAST RUN - LEVEL ' + run.level, score: run.score, mode: 'LEVEL ' + run.level})
+        if ((top.score | 0) > run.score)
+          out.push({label: 'BEST - LEVEL ' + top.level, score: top.score, mode: 'LEVEL ' + top.level})
+      } else if ((top.score | 0) >= 1) {
+        out.push({label: 'BEST - LEVEL ' + top.level, score: top.score, mode: 'LEVEL ' + top.level})
+      }
+      return out.sort((a, b) => b.score - a.score)
     }
   }
 ]

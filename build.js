@@ -56,7 +56,8 @@ function shoot(src, png) {
     '--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=1',
     '--window-size=' + WINDOW, '--virtual-time-budget=' + BUDGET,
     '--screenshot=' + png,
-    'file:///' + src.replace(/\\/g, '/'),
+    // #shot is a hint carts may honour to pose for their picture instead of the title screen.
+    'file:///' + src.replace(/\\/g, '/') + '#shot',
   ], { stdio: 'ignore' })
 }
 

@@ -11,5 +11,11 @@ window.GAMES = [
     "description": "",
     "file": "snake.html",
     "thumb": "thumbs/snake.png"
+  },
+  {
+    "title": "TETRO",
+    "description": "NES-style block stacker with a hold slot, wall kicks and T-spins.",
+    "file": "tetro.html",
+    "thumb": "thumbs/tetro.png"
   }
 ]
