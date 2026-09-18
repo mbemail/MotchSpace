@@ -7,6 +7,12 @@ window.GAMES = [
     "thumb": "thumbs/galactica.png"
   },
   {
+    "title": "RORSCHACH",
+    "description": "A folded inkblot machine: mirrored blots, ten classic plates, a slow morphing flow, and a quiet NES-style drone.",
+    "file": "rorschach.html",
+    "thumb": "thumbs/rorschach.png"
+  },
+  {
     "title": "SNAKE",
     "description": "",
     "file": "snake.html",

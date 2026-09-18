@@ -1,0 +1,615 @@
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A folded inkblot machine: mirrored blots, ten classic plates, a slow morphing flow, and a quiet NES-style drone.">
+<title>RORSCHACH</title>
+<style>
+  html,body{background:#08080a;margin:0;height:100%;overflow:hidden;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+  body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    font-family:monospace}
+  #cab{position:relative;line-height:0;filter:drop-shadow(0 0 24px rgba(120,160,255,.18))}
+  /* Native 256x240 sheet with hard pixels, stretched to fill the space. The second width is the
+     dynamic-viewport version; a browser without dvh keeps the vh line above it.
+     Square pixels. True NTSC shape would be aspect-ratio:292.57/240 (8:7 pixel aspect). */
+  canvas{width:min(98vw,calc(96vh*256/240));width:min(98vw,calc(96dvh*256/240));
+    aspect-ratio:256/240;image-rendering:pixelated;image-rendering:crisp-edges;border-radius:8px;
+    display:block;cursor:crosshair;touch-action:none}
+  @supports (height:100dvh){ html,body{height:100dvh} }
+  #scan{position:absolute;inset:0;pointer-events:none;border-radius:8px;
+    background:repeating-linear-gradient(rgba(0,0,0,.16) 0 1px,transparent 1px 3px);
+    box-shadow:inset 0 0 90px rgba(0,0,0,.55)}
+  #pad{display:none;flex-wrap:wrap;justify-content:center;gap:10px;padding:0 8px}
+  #pad button{background:#101018;border:1px solid #2a3350;color:#cfe0ff;font:inherit;
+    font-size:16px;letter-spacing:2px;padding:10px 14px;border-radius:6px;cursor:pointer;
+    touch-action:manipulation;user-select:none;-webkit-user-select:none}
+  #pad button:active{transform:translateY(1px)}
+  #pad button.on{border-color:#7ea0ff;color:#fff;box-shadow:inset 0 0 0 2px rgba(126,160,255,.3)}
+  /* Touch controls only where there is no fine pointer; the sheet then leaves them room. */
+  @media (pointer:coarse){
+    canvas{width:min(98vw,calc((96vh - 64px)*256/240));width:min(98vw,calc((96dvh - 64px)*256/240))}
+    #pad{display:flex}
+  }
+</style>
+<div id="cab"><canvas id="tv" width="256" height="240"></canvas><div id="scan"></div></div>
+<div id="pad">
+  <button id="bNew" type="button">NEW</button>
+  <button id="bColor" type="button">COLOR</button>
+  <button id="bFlow" type="button">FLOW</button>
+  <button id="bSound" type="button">SOUND</button>
+</div>
+<script>
+(() => {
+'use strict'
+// Everything lives in this closure. Top-level `let/const` names like top, frames or name
+// collide with non-configurable window properties and turn the whole script into a SyntaxError.
+
+// ======================================================================= PPU: palette
+const MASTER = ('7C7C7C 0000FC 0000BC 4428BC 940084 A80020 A81000 881400 503000 007800 006800 005800 004058 000000 000000 000000 '+
+                'BCBCBC 0078F8 0058F8 6844FC D800CC E40058 F83800 E45C10 AC7C00 00B800 00A800 00A844 008888 000000 000000 000000 '+
+                'F8F8F8 3CBCFC 6888FC 9878F8 F878F8 F85898 F87858 FCA044 F8B800 B8F818 58D854 58F898 00E8D8 787878 000000 000000 '+
+                'FCFCFC A4E4FC B8B8F8 D8B8F8 F8B8F8 F8A4C0 F0D0B0 FCE0A8 F8D878 D8F878 B8F8B8 B8F8D8 00FCFC F8D8F8 000000 000000').split(' ')
+const RGB = MASTER.map(h => { const n = parseInt(h, 16)
+  return (0xff << 24 | (n & 255) << 16 | (n >> 8 & 255) << 8 | (n >> 16 & 255)) >>> 0 })
+
+// One background sub-palette per ink scheme: [paper, light, mid, dark]. Paper is the shared
+// backdrop, so the HUD and the blot always sit on the same sheet. No $0D anywhere.
+const SCHEMES = [
+  {n:'BLACK',  p:0x30, t:[0x10,0x00,0x0F]},
+  {n:'BLOOD-RED', p:0x30, t:[0x26,0x16,0x06]},
+  {n:'OCEAN',  p:0x30, t:[0x21,0x11,0x01]},
+  {n:'VIOLET', p:0x30, t:[0x23,0x13,0x04]},
+  {n:'FOREST', p:0x30, t:[0x2A,0x1A,0x0A]},
+  {n:'SEPIA',  p:0x36, t:[0x27,0x17,0x07]},
+  // Multicolour inks: three distinct hues instead of one ramp. Each blob is painted in the
+  // entry of whichever blob owns that region, so the figure breaks into colour zones.
+  {n:'MULTI-PRIMARY', p:0x30, multi:true, t:[0x26,0x2A,0x21]},
+  {n:'MULTI-JEWEL',   p:0x30, multi:true, t:[0x16,0x19,0x13]},
+  {n:'MULTI-CANDY',   p:0x30, multi:true, t:[0x25,0x28,0x2C]},
+  {n:'MULTI-PASTEL',  p:0x30, multi:true, t:[0x27,0x2B,0x23]},
+  {n:'MULTI-ACID',    p:0x30, multi:true, t:[0x29,0x2C,0x15]},
+  {n:'BLACK-RED',     p:0x30, multi:true, t:[0x0F,0x16,0x00]}]   // plates II and III: black figures, red accents
+
+// ======================================================================= CHR ROM (font)
+const T = s => s.trim().split('\n').map(r => r.trim())
+const pack = (name, rows) => {
+  const flat = rows.join('')
+  if (rows.length !== 8 || !/^[0-3]{64}$/.test(flat)) throw Error('CHR ' + name + ' is not 8x8 of digits 0-3')
+  return Uint8Array.from(flat, c => +c)
+}
+const bgChr = [], bgId = {}
+const addBG = (n, t) => (bgId[n] = bgChr.push(pack(n, t)) - 1)
+addBG('BLANK', T('00000000\n'.repeat(8)))
+const FONT = {
+  A:'01110 10001 10001 11111 10001 10001 10001', B:'11110 10001 11110 10001 10001 10001 11110',
+  C:'01110 10001 10000 10000 10000 10001 01110', D:'11100 10010 10001 10001 10001 10010 11100',
+  E:'11111 10000 10000 11110 10000 10000 11111', F:'11111 10000 10000 11110 10000 10000 10000',
+  G:'01110 10001 10000 10111 10001 10001 01111', H:'10001 10001 10001 11111 10001 10001 10001',
+  I:'01110 00100 00100 00100 00100 00100 01110', J:'00111 00010 00010 00010 00010 10010 01100',
+  K:'10001 10010 10100 11000 10100 10010 10001', L:'10000 10000 10000 10000 10000 10000 11111',
+  M:'10001 11011 10101 10101 10001 10001 10001', N:'10001 11001 10101 10011 10001 10001 10001',
+  O:'01110 10001 10001 10001 10001 10001 01110', P:'11110 10001 10001 11110 10000 10000 10000',
+  Q:'01110 10001 10001 10001 10101 10010 01101', R:'11110 10001 10001 11110 10100 10010 10001',
+  S:'01111 10000 10000 01110 00001 00001 11110', T:'11111 00100 00100 00100 00100 00100 00100',
+  U:'10001 10001 10001 10001 10001 10001 01110', V:'10001 10001 10001 10001 10001 01010 00100',
+  W:'10001 10001 10001 10101 10101 10101 01010', X:'10001 10001 01010 00100 01010 10001 10001',
+  Y:'10001 10001 01010 00100 00100 00100 00100', Z:'11111 00001 00010 00100 01000 10000 11111',
+  0:'01110 10001 10011 10101 11001 10001 01110', 1:'00100 01100 00100 00100 00100 00100 01110',
+  2:'01110 10001 00001 00110 01000 10000 11111', 3:'11111 00010 00100 00010 00001 10001 01110',
+  4:'00010 00110 01010 10010 11111 00010 00010', 5:'11111 10000 11110 00001 00001 10001 01110',
+  6:'00110 01000 10000 11110 10001 10001 01110', 7:'11111 00001 00010 00100 01000 01000 01000',
+  8:'01110 10001 10001 01110 10001 10001 01110', 9:'01110 10001 10001 01111 00001 00010 01100',
+  '-':'00000 00000 00000 01110 00000 00000 00000', '.':'00000 00000 00000 00000 00000 01100 01100',
+  '!':'00100 00100 00100 00100 00100 00000 00100', 'x':'00000 10001 01010 00100 01010 10001 00000'}
+for (const [ch, g] of Object.entries(FONT)) {
+  const rows = g.split(' ').map(r => '0' + r + '00')
+  while (rows.length < 8) rows.push('00000000')
+  addBG('F' + ch, rows)
+}
+
+// ======================================================================= Raster
+// SC scales the internal sheet. At 1 it is the PPU's own 256x240, so the pixels stay chunky when
+// the browser stretches it; raise SC for a finer sheet (the HUD font scales with it).
+const SC = 1
+const W = 256 * SC, H = 240 * SC, TILE = 8 * SC, BAR = TILE * 2, BH = H - BAR, HW = W >> 1
+const cv = document.getElementById('tv')
+cv.width = W; cv.height = H
+const ctx = cv.getContext('2d')
+const img = ctx.createImageData(W, H)
+const buf = new Uint32Array(img.data.buffer)
+
+// HUD: 32x2 tiles of text. A content change queues every tile it touches; only a capped few are
+// written per frame, since a full bar swap would blow the vblank budget.
+const barTiles = new Uint8Array(32 * 2).fill(bgId.BLANK), hudWant = new Uint8Array(32 * 2).fill(bgId.BLANK)
+const glyph = ch => ch === ' ' ? bgId.BLANK : (bgId['F' + ch.toUpperCase()] ?? bgId.BLANK)
+let vramWrites = 0, hudQueue = []
+function setHUD(r0, r1){
+  const rows = [r0.slice(0, 32), r1.slice(0, 32)]
+  for (let y = 0; y < 2; y++) for (let x = 0; x < 32; x++) {
+    const id = glyph(rows[y][x] ?? ' '), i = y * 32 + x
+    if (hudWant[i] !== id) { hudWant[i] = id; hudQueue.push(i) }
+  }
+}
+function flushHUD(budget){
+  while (hudQueue.length && budget-- > 0) {
+    const i = hudQueue.shift()
+    if (barTiles[i] !== hudWant[i]) { barTiles[i] = hudWant[i]; vramWrites++ }
+  }
+}
+
+// ======================================================================= APU
+const CPU = 1789773, FPS = 60.0988, WAVE_SR = 44100, STEP = 32
+const NOISE_PERIODS = [4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068]
+const DUTY = [[0,1,0,0,0,0,0,0],[0,1,1,0,0,0,0,0],[0,1,1,1,1,0,0,0],[1,0,0,1,1,1,1,1]]
+const TRI_SEQ = [15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+const COEF = {p1: 0.00752, p2: 0.00752, tri: 0.00851, noise: 0.00494}
+const MASTER_GAIN = 4
+let ac = null, master, pulseBuf, triBuf, noiseBuf, drone = null, droneWanted = true
+const pulseHz = f => { const p = Math.round(CPU / (16 * f)) - 1; return p < 8 || p > 0x7FF ? 0 : CPU / (16 * (p + 1)) }
+const triHz   = f => { const p = Math.round(CPU / (32 * f)) - 1; return p < 2 || p > 0x7FE ? 0 : CPU / (32 * (p + 1)) }
+
+function audioBoot(){                               // browsers require a gesture before audio starts
+  if (ac) { ac.resume(); return }
+  ac = new AudioContext()
+  master = ac.createGain(); master.gain.value = MASTER_GAIN; master.connect(ac.destination)
+  const cycle = (seq, max) => {                     // centred, as the console's output capacitor does
+    const b = ac.createBuffer(1, seq.length * STEP, WAVE_SR), dd = b.getChannelData(0)
+    for (let i = 0; i < dd.length; i++) dd[i] = seq[(i / STEP) | 0] / max - 0.5
+    return b
+  }
+  pulseBuf = DUTY.map(s => cycle(s, 1))
+  triBuf = cycle(TRI_SEQ, 15)
+  noiseBuf = [0, 1].map(mode => {                   // real 15-bit LFSR, both tap modes
+    const out = []; let s = 1
+    do { out.push(s & 1 ? -0.5 : 0.5); const fb = (s ^ (s >> (mode ? 6 : 1))) & 1; s = (s >> 1) | (fb << 14) }
+    while (s !== 1 && out.length < 32767)
+    const b = ac.createBuffer(1, out.length, WAVE_SR); b.getChannelData(0).set(out); return b
+  })
+}
+const rateOf = (ch, hz) => ch === 'noise' ? hz / WAVE_SR : hz * (ch === 'tri' ? 32 : 8) * STEP / WAVE_SR
+const bufOf = (ch, duty, mode) => ch === 'tri' ? triBuf : ch === 'noise' ? noiseBuf[mode ? 1 : 0] : pulseBuf[duty]
+
+// ======================================================================= Ambient drone
+// No song: one slow, very quiet minor drone with an unsettling tritone, low-passed well below the
+// harsh range and swelled by sub-1 Hz LFOs so it breathes. Mixer weights reuse the chip's so the
+// level stays low by construction; the master gain is the only loudness knob and it is small.
+const DRONE_LEVEL = 0.45
+function startDrone(){
+  if (!ac || drone) return
+  const bus = ac.createGain(); bus.gain.value = DRONE_LEVEL
+  const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7
+  lp.connect(bus); bus.connect(master)
+  const sources = []
+  const add = (ch, duty, hz, vol) => {
+    const src = ac.createBufferSource(); src.buffer = bufOf(ch, duty); src.loop = true
+    src.playbackRate.value = rateOf(ch, ch === 'tri' ? triHz(hz) : pulseHz(hz))
+    const g = ac.createGain(); g.gain.value = vol * COEF[ch]
+    src.connect(g).connect(lp); src.start(); sources.push(src); return src
+  }
+  add('tri', 0, 55.00, 3.0)                // sub root
+  add('tri', 0, 82.41, 1.3)                // fifth
+  add('p1', 2, 110.00, 3.0)                // 50% root
+  const beat = add('p1', 2, 110.60, 2.0)   // detuned twin, slow beating
+  add('p1', 1, 155.56, 0.9)                // faint tritone: the unsettling note
+  const lfo = ac.createOscillator(); lfo.frequency.value = 0.06
+  const lg = ac.createGain(); lg.gain.value = 0.18
+  lfo.connect(lg).connect(bus.gain); lfo.start()            // slow swell
+  const drift = ac.createOscillator(); drift.frequency.value = 0.11
+  const dg = ac.createGain(); dg.gain.value = 6             // a few cents of perpetual wobble
+  drift.connect(dg).connect(beat.detune); drift.start()
+  const breathe = ac.createOscillator(); breathe.frequency.value = 0.023
+  const bg = ac.createGain(); bg.gain.value = 140
+  breathe.connect(bg).connect(lp.frequency); breathe.start()  // the filter opens and closes
+  drone = {bus, sources, lfo, drift, breathe}
+}
+function stopDrone(){
+  if (!drone) return
+  const d = drone, t = ac.currentTime; drone = null
+  d.bus.gain.cancelScheduledValues(t); d.bus.gain.setValueAtTime(d.bus.gain.value, t)
+  d.bus.gain.linearRampToValueAtTime(0, t + 1.5)            // fade, never a click
+  setTimeout(() => { try { d.sources.forEach(s => s.stop()); d.lfo.stop(); d.drift.stop(); d.breathe.stop() } catch (e) {} }, 2000)
+}
+
+// ======================================================================= Sound effects
+// One entry per frame, as a driver writes the registers each NMI. Contours are distinct blind:
+// splat falls, blip rises, erase falls further and thinner.
+const SFX = {
+  splat: {ch: 'noise', frames: Array.from({length: 14}, (_, i) => [2 + (i >> 1), 14 - i])},
+  blip:  {ch: 'p2', duty: 1, frames: Array.from({length: 6}, (_, i) => [740 * 2 ** (i / 12), 8])},
+  erase: {ch: 'p2', duty: 0, frames: Array.from({length: 10}, (_, i) => [600 * 2 ** (-i / 7), 9 - (i >> 2)])}}
+function sfx(name){
+  if (!ac) return
+  const s = SFX[name], fs = 1 / FPS, t0 = ac.currentTime + 0.01, end = t0 + s.frames.length * fs
+  const src = ac.createBufferSource(), g = ac.createGain()
+  src.buffer = bufOf(s.ch, s.duty ?? 2, s.mode); src.loop = true
+  s.frames.forEach(([a, vol], i) => {
+    const hz = s.ch === 'noise' ? CPU / NOISE_PERIODS[a] : pulseHz(a)
+    src.playbackRate.setValueAtTime(rateOf(s.ch, hz || 1), t0 + i * fs)
+    g.gain.setValueAtTime(hz ? vol * COEF[s.ch] : 0, t0 + i * fs)
+  })
+  g.gain.setValueAtTime(0, end)
+  src.connect(g).connect(master)
+  src.start(t0); src.stop(end + 0.02)
+}
+
+// ======================================================================= Randomness
+// A maximal-length 16-bit Galois LFSR, stepped every frame and on input, as carts did. A nonzero
+// seed never reaches zero, so the sequence is the full 65535 states.
+let lfsr = 0xA53C
+const rnd = () => (lfsr = ((lfsr >> 1) ^ (-(lfsr & 1) & 0xB400)) & 0xFFFF)
+
+// ======================================================================= Ink blot generator
+// Rorschach folds one sheet: ink is simulated on the left half only, then mirrored. Density is a
+// sum of lobed Gaussian blobs, thresholded into three ink tones with a Bayer-dithered edge, so
+// the tones stay inside one 4-entry background sub-palette.
+const BAYER = [0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5]
+const T_FINAL = 0.8, T_HIGH = 3.2
+const halfD = new Float32Array(HW * BH)
+const halfG = new Uint8Array(HW * BH), halfBest = new Float32Array(HW * BH)   // owning blob's ink zone
+const toneBuf = new Uint8Array(W * BH)
+let blobs = [], reveal = 0, revealLen = 1, scheme = 0, caption = ''
+
+const mkBlob = (x, y, r) => ({x, y, r, g: rnd() % 3,
+  s: 1.0 + (rnd() % 60) / 100,
+  l1: 0.12 + (rnd() % 14) / 100, k1: 2 + (rnd() % 4), p1: (rnd() % 628) / 100,
+  l2: 0.05 + (rnd() % 10) / 100, k2: 5 + (rnd() % 5), p2: (rnd() % 628) / 100})
+const BH0 = 224                                     // authoring space for the random generator
+const bs = (x, y, r) => mkBlob(x * SC, y * SC, r * SC)
+const mirrorX = mx => mx < HW ? mx : W - 1 - mx     // fold the click onto the simulated half
+
+function recomputeDensity(ph){
+  halfD.fill(0); halfBest.fill(0)
+  if (ph == null) ph = (rnd() % 628) / 100                  // frozen during a morph so it does not shimmer
+  for (const b of blobs) {
+    const x0 = Math.max(0, (b.x - b.r * 2) | 0), x1 = Math.min(HW - 1, (b.x + b.r * 2) | 0)
+    const y0 = Math.max(0, (b.y - b.r * 2) | 0), y1 = Math.min(BH - 1, (b.y + b.r * 2) | 0)
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const dx = x - b.x, dy = y - b.y, ang = Math.atan2(dy, dx)
+      const r = b.r * (1 + b.l1 * Math.sin(b.k1 * ang + b.p1) + b.l2 * Math.sin(b.k2 * ang + b.p2))
+      if (r < 1) continue
+      const t = (dx * dx + dy * dy) / (r * r)
+      if (t < 4) {
+        const i = y * HW + x, v = b.s * Math.exp(-t)
+        halfD[i] += v
+        if (v > halfBest[i]) { halfBest[i] = v; halfG[i] = b.g }   // nearest-strongest blob owns the cell
+      }
+    }
+  }
+  for (let y = 0; y < BH; y++) for (let x = 0; x < HW; x++) {   // warp the boundary organically
+    const i = y * HW + x
+    halfD[i] *= 1 + 0.10 * Math.sin(x * (0.09 / SC) + ph) * Math.sin(y * (0.075 / SC) - ph * 0.7)
+  }
+}
+function rebuildTones(th){
+  const multi = SCHEMES[scheme].multi
+  for (let y = 0; y < BH; y++) for (let x = 0; x < HW; x++) {
+    const i = y * HW + x, d = halfD[i], b = BAYER[(y & 3) * 4 + (x & 3)] / 16
+    let tone = 0
+    if (d > th) {
+      if (multi) {                                   // solid colour zone, dithered only at the rim
+        tone = halfG[i] + 1
+        if (Math.min(1, (d - th) / (th * 0.14)) < b) tone = 0
+      } else {                                       // one ramp, shaded by depth with band dithering
+        const u = Math.min(1, (d - th) / (th * 0.7))
+        const bu = u * 2.999, base = bu | 0, frac = bu - base
+        tone = 1 + base + (frac > b ? 1 : 0)
+        if (tone > 3) tone = 3
+        if (tone === 1 && Math.min(1, (d - th) / (th * 0.12)) < b) tone = 0
+      }
+    }
+    toneBuf[y * W + x] = toneBuf[y * W + (W - 1 - x)] = tone
+  }
+}
+function startReveal(n){ reveal = revealLen = n }
+function refreshTones(){ if (reveal <= 0) rebuildTones(T_FINAL) }   // recolour when the ink changes modes
+function tickReveal(){
+  if (reveal <= 0) return
+  const p = 1 - (--reveal) / revealLen, e = 1 - (1 - p) * (1 - p)
+  rebuildTones(T_HIGH + (T_FINAL - T_HIGH) * e + Math.sin(frame * 0.6) * 0.02 * (1 - e))
+}
+
+const N1 = ['MOTH','BEAR','CASTLE','OCEAN','WOLF','FLOWER','SKULL','LANTERN','BRIDGE','TREE','BIRD','MASK','SHIP','MOON','STAIRS','HAND','CLOCK','FISH','CROWN','DOOR','SPIDER','ANGEL','TOWER','RIVER','STAR','CAT','DRAGON','CLOUD','KEY','EYE']
+const N2 = ['DANCING','SLEEPING','FALLING','WEEPING','SINGING','WAITING','BURNING','FLYING','DROWNING','SMILING','HIDING','KISSING','DYING','RISING','MELTING','PRAYING','RUNNING','LAUGHING','BREAKING','DRIFTING']
+const PH = ['IN A STORM','AT DUSK','UPSIDE DOWN','IN THE RAIN','ON FIRE','IN LOVE','ALONE','TOGETHER','FOREVER','AT DAWN']
+const pick = a => a[rnd() % a.length]
+const makeCaption = () => (rnd() % 4 ? 'I SEE A ' + pick(N1) + ' ' + pick(N2) : pick(N1) + ' ' + pick(PH))
+
+// ======================================================================= The ten plates
+// Hand-authored silhouettes for the attract screen: each is the LEFT half only and is mirrored
+// by the same fold as the random generator, so every figure is bilaterally symmetric. Authored
+// as blob layouts (x,y,r) rather than a copy of the originals.
+const B = (x, y, r, o) => { o = o || {}
+  return {x, y, r, g: o.g ?? 0, s: o.s ?? 1.3, l1: o.l1 ?? 0.10, k1: o.k1 ?? 3, p1: o.p1 ?? 0,
+          l2: o.l2 ?? 0.05, k2: o.k2 ?? 6, p2: o.p2 ?? 0} }
+// Big masses carry the gesture; the small blobs are the tendrils, flecks and satellite specks
+// real ink throws off. A negative strength carves a white hole back out of a mass.
+// Weights follow the canonical readings everyone recognises: I a bat with notched wings, II two
+// figures meeting at the fold with red where they touch, III two people over a red centre,
+// IV an enormous dark mass, V the bat/moth, VI an animal hide on a spine, VII two women,
+// VIII-X the multicolour plates. `spread` scatters the three hues by blob index; `{g:1}` forces
+// one blob into the red entry, `{s:-n}` carves a hole.
+const PLATES = [
+  {n:'I', cap:'BAT', sch:0, b:[
+    [116,52,24],[88,48,30],[58,40,24],[32,52,16],[120,100,30],[104,76,14],
+    [92,130,34],[62,150,28],[34,140,20],[116,160,24],[122,190,14],[18,96,8]]},
+  {n:'II', cap:'TWO BEARS', sch:11, b:[
+    [98,44,20],[86,92,28],[116,84,12],[60,100,14],[72,150,22],[66,180,14],[40,124,9],
+    [104,30,12,{g:1}],[126,186,12,{g:1}]]},
+  {n:'III', cap:'TWO PEOPLE', sch:11, b:[
+    [96,38,18],[88,84,24],[122,96,13,{g:1}],[82,140,20],[76,172,12],[58,110,12],[108,52,12]]},
+  {n:'IV', cap:'THE GIANT', sch:0, b:[
+    [104,30,18],[92,66,40],[56,74,34],[32,92,26],[104,104,44],[80,120,40],
+    [110,140,26],[96,184,30],[118,164,26],[58,190,24],[24,120,18]]},
+  {n:'V', cap:'MOTH', sch:0, b:[
+    [126,100,18],[120,124,16],[124,150,15],[124,178,11],
+    [106,80,20],[80,74,18],[54,70,14],[30,68,10],[100,102,14],[74,98,12],
+    [118,40,6],[110,30,5]]},
+  {n:'VI', cap:'SPIRIT', sch:0, b:[
+    [122,60,18],[118,100,22],[122,140,20],[118,176,16],[122,204,12],[92,72,12],
+    [76,104,10],[94,132,12],[78,162,10],[98,190,9],[112,30,9]]},
+  {n:'VII', cap:'TWO WOMEN', sch:0, b:[
+    [96,40,14],[80,76,20],[66,108,20],[70,146,18],[76,176,14],[40,116,8],
+    [110,120,10],[52,28,8],[46,196,8],[64,108,9,{s:-1.2}]]},
+  {n:'VIII',cap:'CREATURES', sch:9, spread:true, b:[
+    [124,96,20],[122,60,14],[124,132,16],[124,40,10],[76,84,24],[54,56,14],
+    [50,110,12],[88,116,14],[110,176,20],[80,186,18],[50,180,14],[32,140,10],
+    [72,84,11,{s:-1.2}]]},
+  {n:'IX', cap:'EMBERS', sch:8, spread:true, b:[
+    [122,100,28],[112,68,18],[114,138,18],[76,72,18],[70,140,16],[44,96,14],
+    [32,56,10],[28,160,10],[92,108,9],[124,118,10,{s:-1.3}]]},
+  {n:'X', cap:'SEA LIFE', sch:6, spread:true, b:[
+    [124,92,14],[120,132,11],[110,34,13],[72,46,11],[40,66,14],[102,64,10],
+    [78,98,11],[44,124,13],[100,136,11],[64,156,14],[28,94,11],[116,170,13],
+    [52,186,12],[86,200,11],[32,154,11],[124,214,10],[58,32,9],[36,200,9]]}
+]
+function plateBlobs(i){
+  const p = PLATES[i]
+  return p.b.map((b, j) => {
+    const o = b[3], z = B(b[0] * SC, b[1] * SC, b[2] * SC, o)
+    z.g = o && o.g != null ? o.g : (p.spread ? j % 3 : 0)
+    return z
+  })
+}
+function loadPlate(i){
+  plate = i
+  blobs = plateBlobs(i)
+  if (PLATES[i].sch != null) scheme = PLATES[i].sch
+  recomputeDensity(); startReveal(56)
+}
+// Linear blend of two blob sets, shape by shape. A blob only in one set grows from, or shrinks
+// to, nothing in place, so morphs read as ink flowing rather than a crossfade.
+function interpBlobs(A, B, k){
+  // Sorting both sets by position pairs nearby blobs, so shapes glide instead of swapping slots.
+  const sort = arr => arr.slice().sort((p, q) => (p.y - q.y) || (p.x - q.x))
+  const a0 = sort(A), b0 = sort(B)
+  const n = Math.max(a0.length, b0.length), out = new Array(n), L = (u, v) => u + (v - u) * k
+  for (let i = 0; i < n; i++) {
+    const sa = a0[i] || {...b0[i], r: 0, s: 0}         // only in the target: grows from nothing in place
+    const sb = b0[i] || {...a0[i], r: 0, s: 0}         // only in the source: shrinks away in place
+    out[i] = {
+      x: L(sa.x, sb.x), y: L(sa.y, sb.y), r: L(sa.r, sb.r), s: L(sa.s, sb.s),
+      l1: L(sa.l1, sb.l1), k1: L(sa.k1, sb.k1), p1: L(sa.p1, sb.p1),
+      l2: L(sa.l2, sb.l2), k2: L(sa.k2, sb.k2), p2: L(sa.p2, sb.p2),
+      g: sa.g}                                         // hue holds through the morph and snaps at the end
+  }
+  return out
+}
+
+function randomBlobs(){
+  const out = [bs(114 + rnd() % 14, 58 + rnd() % 100, 34 + rnd() % 26)]     // mass doubled at the fold
+  for (let i = 0, s = 3 + rnd() % 2; i < s; i++)                           // a spine along the seam
+    out.push(bs(104 + rnd() % 22, 22 + rnd() % (BH0 - 44), 18 + rnd() % 22))
+  for (let i = 0, n = 4 + rnd() % 3; i < n; i++)                           // outward lobes, clear of the edge
+    out.push(bs(34 + rnd() % 80, 26 + rnd() % (BH0 - 52), 17 + rnd() % 26))
+  return out
+}
+function newBlot(){
+  morph = null
+  blobs = randomBlobs()
+  caption = makeCaption()
+  recomputeDensity()
+  startReveal(48)
+}
+function nearestBlob(bx, by){
+  let best = -1, bd = Infinity
+  for (let i = 0; i < blobs.length; i++) {
+    const dx = blobs[i].x - bx, dy = blobs[i].y - by, d = dx * dx + dy * dy
+    if (d < bd) { bd = d; best = i }
+  }
+  return best
+}
+// Click toggles: ink under the cursor is removed, bare paper gets a new blob. Both are mirrored.
+function paint(mx, my){
+  if (my < 0 || my >= BH || mx < 0 || mx >= W) return
+  morph = null                                        // a click takes over from any morph
+  if (toneBuf[my * W + mx]) {
+    if (!blobs.length) return
+    blobs.splice(nearestBlob(mirrorX(mx), my), 1)
+    recomputeDensity(); startReveal(16); sfx('erase')
+  } else if (blobs.length < 20) {
+    blobs.push(mkBlob(mirrorX(mx), my, (16 + rnd() % 22) * SC))
+    recomputeDensity(); startReveal(20); sfx('splat')
+  }
+}
+
+// ======================================================================= Joypad and pointer
+const KEYS = {ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R', KeyW:'U', KeyS:'D', KeyA:'L', KeyD:'R',
+              KeyX:'A', KeyZ:'B', KeyR:'FLOW', Enter:'START', Space:'START', ShiftLeft:'SELECT', ShiftRight:'SELECT', KeyC:'SELECT'}
+const OPP = {L:'R', R:'L', U:'D', D:'U'}
+const pad = {}, was = {}
+const pressed = b => pad[b] && !was[b]
+const typing = e => e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')
+addEventListener('keydown', e => { if (typing(e)) return; const b = KEYS[e.code]; if (!b) return
+  e.preventDefault(); firstGesture(); pad[b] = 1; if (OPP[b]) pad[OPP[b]] = 0; idle = 0; autoT = AUTO_DELAY })
+addEventListener('keyup', e => { if (typing(e)) return; const b = KEYS[e.code]; if (b) pad[b] = 0 })
+function firstGesture(){
+  audioBoot(); idle = 0; autoT = AUTO_DELAY
+  if (droneWanted && !drone) startDrone()
+}
+// Shared by the keyboard and the on-screen buttons.
+function doNew(){ newBlot(); sfx('splat'); idle = 0; autoT = AUTO_DELAY }
+function doColor(){ scheme = (scheme + 1) % SCHEMES.length; refreshTones(); sfx('blip'); idle = 0; autoT = AUTO_DELAY }
+function doFlow(){ flow = !flow; morph = null; flowHold = 40; if (flow) sfx('blip'); idle = 0 }
+function doSound(){ droneWanted = !droneWanted; droneWanted ? startDrone() : stopDrone() }
+function point(e){
+  const r = ctx.canvas.getBoundingClientRect()
+  return {mx: Math.max(0, Math.min(W - 1, ((e.clientX - r.left) / r.width * W) | 0)),
+          my: Math.max(0, Math.min(H - 1, ((e.clientY - r.top) / r.height * H) | 0))}
+}
+ctx.canvas.addEventListener('pointerdown', e => {
+  e.preventDefault(); firstGesture()
+  if (state === 'TITLE') { state = 'PLAY'; scheme = 0; newBlot(); sfx('splat'); return }
+  const {mx, my} = point(e)
+  paint(mx, my)
+})
+
+// Touch controls: the same actions as the keys, and FLOW lights up while the stream is running.
+const bFlowEl = document.getElementById('bFlow'), bSoundEl = document.getElementById('bSound')
+for (const [id, fn] of [['bNew', doNew], ['bColor', doColor], ['bFlow', doFlow], ['bSound', doSound]]) {
+  const el = document.getElementById(id)
+  if (el && el.addEventListener) el.addEventListener('pointerdown', e => {
+    e.preventDefault(); firstGesture(); if (state === 'TITLE') state = 'PLAY'; fn()
+  })
+}
+function syncPad(){
+  if (bFlowEl && bFlowEl.classList) bFlowEl.classList.toggle('on', flow)
+  if (bSoundEl && bSoundEl.classList) bSoundEl.classList.toggle('on', droneWanted)
+}
+
+
+// ======================================================================= Clock, state and loop
+const FRAME_MS = 1000 / FPS, AUTO_DELAY = 15 * FPS, PLATE_FRAMES = 180, MORPH_FRAMES = 190, FLOW_HOLD = 110
+let acc = 0, last = performance.now(), frame = 0, state = 'TITLE', plate = 0, attract = PLATE_FRAMES
+let idle = 0, autoT = AUTO_DELAY, flow = false, flowHold = 0, morph = null, warpPh = 0
+
+function tick(){
+  frame++; vramWrites = 0; rnd()
+  if (state === 'TITLE') {
+    if (pressed('START')) { state = 'PLAY'; scheme = 0; newBlot(); sfx('splat') }
+    else if (--attract <= 0) { plate = (plate + 1) % PLATES.length; loadPlate(plate); attract = PLATE_FRAMES }
+  } else {
+    if (pressed('A')) doNew()
+    if (pressed('B')) doColor()
+    if (pressed('SELECT')) doSound()
+    if (pressed('FLOW')) doFlow()
+    if (flow) {                                        // a slow stream of shapes that melt into each other
+      idle = 0
+      warpPh += 0.0016                                 // the boundary warp drifts, never jumps
+      if (morph) {
+        morph.t++
+        const p = Math.min(1, morph.t / morph.dur)
+        const k = p * p * p * (p * (p * 6 - 15) + 10)  // smootherstep: gentle at both ends
+        blobs = interpBlobs(morph.from, morph.to, k)
+        recomputeDensity(warpPh); rebuildTones(T_FINAL)
+        if (p >= 1) { blobs = morph.to; morph = null }
+      } else if (--flowHold <= 0) {
+        let to
+        if (rnd() % 2 === 0) {                         // the next plate, in whatever ink is selected
+          const pi = (plate + 1) % PLATES.length
+          to = plateBlobs(pi); plate = pi
+          caption = 'PLATE ' + PLATES[pi].n + ' - ' + PLATES[pi].cap
+        } else { to = randomBlobs(); caption = makeCaption() }
+        reveal = 0
+        morph = {from: blobs, to, t: 0, dur: MORPH_FRAMES}
+        flowHold = FLOW_HOLD
+      }
+    }
+    if (++idle > AUTO_DELAY && --autoT <= 0) { newBlot(); autoT = 6 * FPS }   // idle attract, silent
+  }
+  tickReveal()
+  if (state === 'TITLE') setHUD('PLATE ' + PLATES[plate].n + ' - ' + PLATES[plate].cap, 'RORSCHACH - PRESS START OR CLICK')
+  else setHUD((flow ? 'FLOW  ' : '') + caption, 'CLICK-ADD-REMOVE X-NEW Z-COLOR R-FLOW')
+  flushHUD(30)
+  syncPad()
+  Object.assign(was, pad)
+  console.assert(vramWrites <= 32, 'VRAM budget exceeded: ' + vramWrites + ' tile writes in one frame')
+}
+
+function render(){
+  const s = SCHEMES[scheme], t = s.t
+  const inkRGB = [RGB[s.p], RGB[t[0]], RGB[t[1]], RGB[t[2]]]          // tone 0..3
+  const hudInk = RGB[s.multi ? 0x0F : t[2]]                           // multicolour needs a fixed dark text
+  const paper = RGB[s.p]
+  for (let y = 0; y < BH; y++) for (let x = 0; x < W; x++) {
+    const o = y * W + x
+    buf[o] = inkRGB[toneBuf[o]]
+  }
+  for (let y = BH; y < H; y++) for (let x = 0; x < W; x++) buf[y * W + x] = paper   // HUD band
+  for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 32; tx++) {                  // font at SC scale
+    const tile = bgChr[barTiles[ty * 32 + tx]]
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      if (!tile[y * 8 + x]) continue
+      for (let dy = 0; dy < SC; dy++) for (let dx = 0; dx < SC; dx++) {
+        const o = (BH + ty * TILE + y * SC + dy) * W + tx * TILE + x * SC + dx
+        buf[o] = hudInk
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+const loop = now => {
+  acc += now - last; last = now
+  if (acc > FRAME_MS * 8) acc = FRAME_MS                      // after a stall, drop frames, no fast-forward
+  while (acc >= FRAME_MS) { acc -= FRAME_MS; tick() }
+  render()
+  requestAnimationFrame(loop)
+}
+
+// ======================================================================= Self test
+function selfTest(){
+  const ok = (c, m) => { if (!c) throw Error('NES limit broken: ' + m) }
+  ok(bgChr.length <= 256, 'background pattern table holds 256, has ' + bgChr.length)
+  SCHEMES.forEach((s, i) => {
+    const p = [s.p, ...s.t]
+    ok(p.length === 4 && new Set(p).size === 4, 'scheme ' + i + ' is four distinct entries')
+    for (const c of p) ok(Number.isInteger(c) && c >= 0 && c < 64 && c !== 0x0D, 'scheme ' + i + ' uses a legal colour, not ' + c)
+  })
+  ok(SC >= 1 && HW * 2 === W && BH + 2 * TILE === H, 'the scaled sheet sits above a two-tile HUD')
+  ok(halfD.length === HW * BH && toneBuf.length === W * BH, 'ink buffers match the sheet')
+  ok(SCHEMES.some(s => s.multi), 'at least one multicolour ink')
+  ok(PLATES.length >= 6, 'enough plates to cycle')
+  PLATES.forEach((p, i) => {
+    ok(p.n && p.cap && p.b.length, 'plate ' + i + ' is named and has blobs')
+    if (p.sch != null) ok(SCHEMES[p.sch], 'plate ' + i + ' names a real scheme')
+    for (const [x, y, r] of p.b) ok(x >= 0 && x < HW && y >= 0 && y < BH && r > 0, 'plate ' + i + ' blob out of range')
+  })
+  const VOICES = ['p1','p2','tri','noise']
+  for (const [k, s] of Object.entries(SFX)) ok(VOICES.includes(s.ch) && s.frames.length, 'effect ' + k)
+  for (const s of SFX.splat.frames) ok(s[0] >= 0 && s[0] < NOISE_PERIODS.length, 'noise period index in range')
+  console.log('NES OK: CHR ' + bgChr.length + ' of 256, ' + SCHEMES.length + ' ink schemes, quiet drone ready')
+}
+
+// Debug handle. Hidden tabs pause requestAnimationFrame, so drive tick() by hand, clear the pad
+// first, and render then sample inside the same call.
+window.NES = {
+  tick, draw: render, sfx, audioBoot, gesture: firstGesture, newBlot, paint, loadPlate,
+  plates: () => PLATES.map(p => p.n + ' ' + p.cap),
+  schemes: () => SCHEMES.map(s => s.n),
+  scheme: () => SCHEMES[scheme].n,
+  setScheme: i => { scheme = ((i % SCHEMES.length) + SCHEMES.length) % SCHEMES.length; refreshTones() },
+  flow: () => flow, morphing: () => !!morph,
+  addInk: (x, y) => { blobs.push(mkBlob(mirrorX(x), y, 20 * SC)); recomputeDensity(); startReveal(12) },
+  toneAt: (x, y) => toneBuf[y * W + x],
+  drone: () => !!drone,
+  press: b => { pad[b] = 1; tick(); pad[b] = 0; tick() },
+  clear: () => { for (const k in pad) pad[k] = 0 },
+  finish: () => { while (reveal > 0) tickReveal() },
+  coverage: () => { let n = 0; for (let i = 0; i < toneBuf.length; i++) if (toneBuf[i]) n++; return n / toneBuf.length },
+  fingerprint: () => { let h = 2166136261; for (let i = 0; i < toneBuf.length; i++) h = ((h ^ toneBuf[i]) * 16777619) >>> 0; return h },
+  symmetric: () => { for (let y = 0; y < BH; y++) for (let x = 0; x < HW; x++)
+    if (toneBuf[y * W + x] !== toneBuf[y * W + (W - 1 - x)]) return false; return true },
+  peek: () => ({state, frame, plate, flow, scheme: SCHEMES[scheme].n, blobs: blobs.length, reveal, caption})
+}
+
+selfTest(); loadPlate(0); tickReveal()
+setHUD('PLATE ' + PLATES[0].n + ' - ' + PLATES[0].cap, 'RORSCHACH - PRESS START OR CLICK'); flushHUD(64)
+// #shot: pose a finished plate for the MotchSpace hub thumbnail instead of the title screen.
+if (typeof location !== 'undefined' && location.hash === '#shot') {
+  state = 'PLAY'; scheme = 9; loadPlate(7); reveal = 0; rebuildTones(T_FINAL)
+  caption = 'PLATE ' + PLATES[7].n + ' - ' + PLATES[7].cap
+  setHUD(caption, 'CLICK-ADD-REMOVE X-NEW Z-COLOR R-FLOW'); flushHUD(64)
+}
+requestAnimationFrame(loop)
+})()
+</script>
+
