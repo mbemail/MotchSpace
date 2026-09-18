@@ -143,6 +143,8 @@
       const LEFT_PANEL_W = 160;
 
       const GRAVITY_TABLE = [48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1];
+      const LOCK_DELAY = 60;          // ~1 s of slack before a landed piece locks
+      const MAX_LOCK_RESETS = 15;     // cap the slide resets so a wiggle cannot stall forever
       const SCORE_TABLE = [0, 40, 100, 300, 1200];
 
       // NES-ish flat palette (solid colors, no gradients)
@@ -947,6 +949,8 @@
           this.dasDirection = 0; // -1 left, 1 right
           this.dasCounter = 0;
           this.lastPressedDirection = 0;
+          this.lockTimer = 0;
+          this.lockResets = 0;
 
           this.mode = 'classic'; // the site opens on NES Classic
           this.tvCanvas = document.getElementById('tv');
@@ -1142,6 +1146,8 @@
           this.gravityCounter = 0;
           this.softDropCellsThisPiece = 0;
           this.lastMoveWasRotation = false;
+          this.lockTimer = 0;
+          this.lockResets = 0;
 
           if (this.board.collides(this.piece)) {
             this.state = 'gameover';
@@ -1200,6 +1206,7 @@
             this.piece.x = nx;
             this.lastMoveWasRotation = false;
             this.audio.move();
+            this.resetLock();
             return true;
           }
 
@@ -1238,6 +1245,7 @@
               if (!this.board.collides(this.piece, nx, this.piece.y, this.piece.rot)) {
                 this.piece.x = nx;
                 this.audio.move();
+                this.resetLock();
               }
             }
           }
@@ -1257,6 +1265,7 @@
               this.piece.rot = nr;
               this.lastMoveWasRotation = true;
               this.audio.rotate();
+              this.resetLock();
               return true;
             }
           }
@@ -1266,23 +1275,28 @@
         stepDown(bySoftDrop = false) {
           if (!this.piece) return false;
           const ny = this.piece.y + 1;
-          if (!this.board.collides(this.piece, this.piece.x, ny, this.piece.rot)) {
-            this.piece.y = ny;
-            this.lastMoveWasRotation = false;
-            if (bySoftDrop && this.softDropCellsThisPiece < 20) {
-              this.score = Math.min(999999, this.score + 1);
-              this.softDropCellsThisPiece++;
-            }
-
-            // No lock delay: if the piece is now resting on something, lock immediately.
-            if (this.board.collides(this.piece, this.piece.x, this.piece.y + 1, this.piece.rot)) {
-              this.lockPiece();
-              return false;
-            }
-            return true;
+          if (this.board.collides(this.piece, this.piece.x, ny, this.piece.rot)) return false;
+          this.piece.y = ny;
+          this.lastMoveWasRotation = false;
+          this.lockResets = 0;                       // a new low row re-arms the slide resets
+          if (bySoftDrop && this.softDropCellsThisPiece < 20) {
+            this.score = Math.min(999999, this.score + 1);
+            this.softDropCellsThisPiece++;
           }
-          this.lockPiece();
-          return false;
+          return true;
+        }
+
+        grounded() {
+          return !!this.piece && this.board.collides(this.piece, this.piece.x, this.piece.y + 1, this.piece.rot);
+        }
+
+        // Give the player the lock delay back when they move or rotate a landed piece, so it
+        // can slide across the stack into an overhang. Capped, or it could never lock.
+        resetLock() {
+          if (this.grounded() && this.lockResets < MAX_LOCK_RESETS) {
+            this.lockTimer = 0;
+            this.lockResets++;
+          }
         }
 
         lockPiece() {
@@ -1392,7 +1406,13 @@
           if (!this.piece) return;
 
           this.updateDAS();
+          if (!this.piece) return;
 
+          if (this.grounded()) {                     // landed: run the lock delay, not gravity
+            if (++this.lockTimer >= LOCK_DELAY) this.lockPiece();
+            return;
+          }
+          this.lockTimer = 0;
           this.gravityCounter++;
           const dropFrames = this.effectiveDropFrames();
           if (this.gravityCounter >= dropFrames) {
@@ -1666,6 +1686,18 @@
         if (game.piece !== null) throw new Error('hard drop must lock the piece');
         if (game.board.grid[21][4] == null) throw new Error('hard drop must land on the floor');
         if (game.score !== 40) throw new Error('hard drop must score 2 per cell');
+
+        // A landed piece slides before it locks, and the slide resets are capped.
+        const lg = Object.create(Game.prototype);
+        lg.board = new Board(10, 22);
+        lg.board.grid[21][4] = 'I';
+        lg.piece = new Piece('O', 4, 19, 0);
+        lg.lockTimer = 30; lg.lockResets = 0;
+        lg.resetLock();
+        if (lg.lockTimer !== 0 || lg.lockResets !== 1) throw new Error('a grounded move must reset the lock delay');
+        lg.lockTimer = 30; lg.lockResets = MAX_LOCK_RESETS;
+        lg.resetLock();
+        if (lg.lockTimer !== 30) throw new Error('lock-delay resets must be capped');
       }
 
       window.NES = { selfTest, Game, Board, Piece, KICKS, classic: NES };
