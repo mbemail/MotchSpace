@@ -36,13 +36,15 @@
     border:3px solid var(--ink);border-radius:5px;filter:url(#wob);
   }
 
-  header{text-align:center;padding:40px 0 30px}
+  header{text-align:center;padding:56px 0 30px}
   .wolf{display:block;width:min(300px,70%);margin:0 auto;padding:0;border:0;background:none;cursor:pointer;
         touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .wolf img{display:block;width:100%;height:auto;filter:invert(1);image-rendering:pixelated}
   .wolf.bark{animation:bark .25s steps(3)}
   @keyframes bark{30%{transform:translateY(-3px) rotate(-1.5deg)}65%{transform:rotate(1deg)}}
   h1{margin:10px 0 0;font-size:clamp(34px,9vw,64px);font-weight:400;line-height:1.1}
+  /* the font is monospace, so ' and i sit in wide cells: pull them together */
+  .k{letter-spacing:-.26em;margin-left:-.12em;margin-right:.1em}
   .tag{margin:6px 0 0;color:var(--pen);font-size:clamp(20px,5vw,28px)}
   .lead{max-width:30em;margin:20px auto 28px;color:var(--dim)}
   .btn{
@@ -69,7 +71,23 @@
   .events h3{margin:0;font-size:clamp(26px,6.5vw,34px);font-weight:400;line-height:1.2}
   .events p{margin:4px 0 0;color:var(--pen);font-size:clamp(20px,5vw,24px)}
   .events p+p{color:var(--dim)}
+  .events img{display:block;width:100%;height:auto;margin-bottom:14px}
   section{padding:40px 0}
+  #a11y{position:absolute;top:10px;right:10px;z-index:2;padding:6px 12px;border:2px solid var(--ink);background:var(--bg);
+        color:var(--ink);font:15px/1.2 Verdana,Geneva,sans-serif;cursor:pointer}
+  #a11y:hover{background:var(--ink);color:#000}
+  /* accessibility mode: plain readable type, straight cards */
+  .plain body{font:17px/1.6 Verdana,Geneva,sans-serif}
+  .plain .k{letter-spacing:0;margin:0}
+  .plain h1{font-size:clamp(28px,7vw,48px)}
+  .plain h2{font-size:clamp(24px,6vw,32px)}
+  .plain .tag,.plain .btn{font-size:20px}
+  .plain .grid h3,.plain .cols h3{font-size:20px}
+  .plain .grid p,.plain .cols p{font-size:16px}
+  .plain .events h3{font-size:22px}
+  .plain .events p{font-size:17px}
+  .plain .grid li{transform:none}
+  .plain .lead,.plain .grid p,.plain .cols p,.plain .events p+p,.plain #contact ul,.plain footer{color:#d0d0d0}
   h2{margin:0 0 26px;font-size:clamp(30px,7vw,42px);font-weight:400}
   h2::after{content:"";display:block;width:5.5em;max-width:100%;height:8px;margin-top:2px;background:var(--dither)}
   .sub{margin:10px 0 26px;color:var(--dim)}
@@ -106,11 +124,12 @@
   <feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="2" seed="7"/>
   <feDisplacementMap in="SourceGraphic" scale="6"/>
 </filter></svg>
+<button id="a11y" type="button">Accessibility mode</button>
 <div class="wrap">
 
 <header>
   <button class="wolf" type="button" aria-label="Wolf doodle. Tap to hear it bark."><img src="img/wolf.png" alt="" width="616" height="373"></button>
-  <h1>Ma'iinganz Makes</h1>
+  <h1>Ma<span class="k">'ii</span>nganz Makes</h1>
   <p class="tag">handmade leatherwork</p>
   <p class="lead">Pouches, bags, cases and small goods, cut and stitched by hand, one at a time.
      Everything on this page is my own work, and I take custom orders.</p>
@@ -125,7 +144,7 @@
   <div class="beads" aria-hidden="true"></div>
   <ul class="events">
     <!-- EVENTS: one <li> each, soonest first. data-end = the day it happens (YYYY-MM-DD); it hides itself the day after. -->
-    <li class="frame" data-end="2026-11-19"><h3>Moonlight Magic Indigenous Artisan Market</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building, 602 Queen Street East, Sault Ste. Marie</p><p><a href="https://www.facebook.com/events/29502466852697274/">Event page on Facebook</a></p></li>
+    <li class="frame" data-end="2026-11-19"><img src="img/table.jpg" alt="My table: drumsticks, deer hide pouches, lighter cases, keychains, leather bags and a journal laid out" width="1200" height="643"><h3>Moonlight Magic Indigenous Artisan Market</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building, 602 Queen Street East, Sault Ste. Marie</p><p><a href="https://www.facebook.com/events/29502466852697274/">Event page on Facebook</a></p></li>
     <!-- /EVENTS -->
   </ul>
   <p class="sub" id="noevents" hidden>Nothing booked right now. Check back soon.</p>
@@ -192,11 +211,22 @@
 
 <footer>
   <ul class="boxes" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ul>
-  <p>Miigwetch! - Ma'iinganz Makes</p>
+  <p>Miigwetch! - Ma<span class="k">'ii</span>nganz Makes</p>
 </footer>
 
 </div>
 <script>
+// accessibility mode: swap the handwriting for Verdana, remembered between visits
+const a11y = document.getElementById('a11y')
+const plain = on => {
+  document.documentElement.classList.toggle('plain', on)
+  a11y.textContent = on ? 'Unaccessibility mode' : 'Accessibility mode'
+  a11y.setAttribute('aria-pressed', on)
+  try { localStorage.plain = on ? 1 : '' } catch {}
+}
+let saved = ''; try { saved = localStorage.plain } catch {}
+plain(!!saved)
+a11y.onclick = () => plain(!document.documentElement.classList.contains('plain'))
 // the wolf barks
 const wolf = document.querySelector('.wolf'), bark = new Audio('bark.mp3')
 wolf.onclick = () => {
