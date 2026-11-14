@@ -99,6 +99,15 @@
   .grid li:nth-child(even){transform:rotate(.6deg)}
   .grid li:nth-child(3n){transform:rotate(1deg)}
   .grid img{display:block;width:100%;height:auto;aspect-ratio:1;background:#fff}
+  /* similar items stack in one card: swipe sideways, or use the arrows */
+  .slides{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain}
+  .slides::-webkit-scrollbar{display:none}
+  .slides img{flex:0 0 100%;scroll-snap-align:start}
+  .nav{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:6px}
+  .nav button{width:44px;height:36px;padding:0;border:2px solid var(--ink);background:var(--bg);color:var(--ink);
+              font:22px/1 inherit;font-family:inherit;cursor:pointer;touch-action:manipulation}
+  .nav button:hover{background:var(--ink);color:#000}
+  .nav span{min-width:3em;text-align:center;color:var(--dim);font-size:18px}
   .grid h3{margin:10px 4px 0;font-size:26px;font-weight:400;line-height:1.2}
   .grid p{margin:2px 4px 10px;font-size:19px;line-height:1.35;color:var(--dim)}
 
@@ -155,7 +164,7 @@
 <section id="work">
   <h2>The work</h2>
   <ul class="grid">
-    <!-- LISTINGS: one <li> per product, newest first. Photos are 900x900 white-background JPGs in img/. No prices. -->
+    <!-- LISTINGS: one <li> per product, newest first. Similar items share one <li> with a <div class="slides"> of photos. Photos are 900x900 white-background JPGs in img/. No prices. -->
     <li class="frame"><img src="img/deerhide-pouch.jpg" alt="Golden deer hide medicine pouch with a long tie" width="900" height="900">
         <h3>Medicine pouches</h3><p>Real deer hide with a long tie. Small and fringed styles.</p></li>
     <li class="frame"><img src="img/drumsticks.jpg" alt="Three drumsticks with deer hide heads and wrapped handles" width="900" height="900" loading="lazy">
@@ -168,16 +177,14 @@
         <h3>Drawstring bag</h3><p>Brown leather, cream lace.</p></li>
     <li class="frame"><img src="img/lighter-cases.jpg" alt="Leather lighter cases in tan, blue, brown and white, some fringed" width="900" height="900" loading="lazy">
         <h3>Lighter cases</h3><p>Plain and fringed, in several colours.</p></li>
-    <li class="frame"><img src="img/fish-keychains.jpg" alt="Blue leather fish keychains with stitched details" width="900" height="900" loading="lazy">
-        <h3>Fish keychains</h3><p>Blue leather with stitched details.</p></li>
-    <li class="frame"><img src="img/wheel-magnet.jpg" alt="Round clay medicine wheel magnet painted white, yellow, red and black" width="900" height="900" loading="lazy">
-        <h3>Medicine wheel magnets</h3><p>Hand-shaped clay, painted and glossed.</p></li>
-    <li class="frame"><img src="img/dreamcatcher-feather.jpg" alt="Dreamcatcher with a wrapped hoop, beaded web and hanging feathers" width="900" height="900" loading="lazy">
-        <h3>Feather dreamcatcher</h3><p>Wrapped hoop, beaded web, hanging feathers.</p></li>
-    <li class="frame"><img src="img/dreamcatcher-beaded.jpg" alt="Mini dreamcatcher on a cord-wrapped ring with seed beads" width="900" height="900" loading="lazy">
-        <h3>Mini beaded dreamcatcher</h3><p>Cord-wrapped ring with gold, gunmetal and clear seed beads.</p></li>
-    <li class="frame"><img src="img/loomwork.jpg" alt="Beaded band in white, red, green and blue on a bead loom" width="900" height="900" loading="lazy">
-        <h3>Loomwork</h3><p>Loom-beaded bands, here still on the loom.</p></li>
+    <li class="frame"><div class="slides" tabindex="0" aria-label="Keychains photos, scroll sideways for more"><img src="img/fish-keychains.jpg" alt="Blue leather fish keychains with stitched details" width="900" height="900" loading="lazy"><img src="img/woven-keychain.jpg" alt="Woven strap keychain on a clasp" width="900" height="900" loading="lazy"></div>
+        <h3>Keychains</h3><p>Stitched leather fish and woven straps on clasps.</p></li>
+    <li class="frame"><div class="slides" tabindex="0" aria-label="Medicine wheel magnets photos, scroll sideways for more"><img src="img/wheel-magnet.jpg" alt="Round clay medicine wheel magnet painted white, yellow, red and black" width="900" height="900" loading="lazy"><img src="img/wheel-magnets-sizes.jpg" alt="Small and large medicine wheel magnets side by side" width="900" height="900" loading="lazy"></div>
+        <h3>Medicine wheel magnets</h3><p>Hand-shaped clay, painted and glossed. Small and large.</p></li>
+    <li class="frame"><div class="slides" tabindex="0" aria-label="Dreamcatchers photos, scroll sideways for more"><img src="img/dreamcatcher-feather.jpg" alt="Dreamcatcher with a wrapped hoop, beaded web and hanging feathers" width="900" height="900" loading="lazy"><img src="img/dreamcatcher-beaded.jpg" alt="Mini dreamcatcher on a cord-wrapped ring with seed beads" width="900" height="900" loading="lazy"></div>
+        <h3>Dreamcatchers</h3><p>Feather dreamcatchers and mini beaded ones.</p></li>
+    <li class="frame"><div class="slides" tabindex="0" aria-label="Loomwork & bands photos, scroll sideways for more"><img src="img/loomwork.jpg" alt="Beaded band in white, red, green and blue on a bead loom" width="900" height="900" loading="lazy"><img src="img/bands.jpg" alt="Four bands: woven friendship bands and a rainbow loom-beaded band" width="900" height="900" loading="lazy"></div>
+        <h3>Loomwork & bands</h3><p>Loom-beaded bands and woven bracelets.</p></li>
     <!-- /LISTINGS -->
   </ul>
 </section>
@@ -236,6 +243,19 @@ wolf.onclick = () => {
   const bark = barks[Math.floor(Math.random() * barks.length)]
   bark.currentTime = 0; bark.play().catch(() => {})
   wolf.classList.remove('bark'); void wolf.offsetWidth; wolf.classList.add('bark')
+}
+// photo stacks: arrows + "1 / 2" counter under each .slides
+for (const el of document.querySelectorAll('.slides')) {
+  const n = el.children.length, nav = document.createElement('div')
+  nav.className = 'nav'
+  nav.innerHTML = '<button type="button" aria-label="Previous photo">&lt;</button><span>1 / ' + n + '</span><button type="button" aria-label="Next photo">&gt;</button>'
+  const [prev, count, next] = nav.children
+  const at = () => Math.round(el.scrollLeft / el.clientWidth)
+  const go = i => el.scrollTo({left: ((i + n) % n) * el.clientWidth, behavior: 'smooth'})
+  prev.onclick = () => go(at() - 1)
+  next.onclick = () => go(at() + 1)
+  el.addEventListener('scroll', () => { count.textContent = (at() + 1) + ' / ' + n }, {passive: true})
+  el.after(nav)
 }
 // past events drop off on their own
 const d = new Date(), today = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
