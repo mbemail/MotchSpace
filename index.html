@@ -40,8 +40,8 @@
   .wolf{display:block;width:min(300px,70%);margin:0 auto;padding:0;border:0;background:none;cursor:pointer;
         touch-action:manipulation;-webkit-tap-highlight-color:transparent}
   .wolf img{display:block;width:100%;height:auto;filter:invert(1);image-rendering:pixelated}
-  .wolf.bark{animation:bark .32s steps(4)}
-  @keyframes bark{25%{transform:translateY(-10px) rotate(-5deg) scale(1.06)}60%{transform:translateY(0) rotate(3deg)}}
+  .wolf.bark{animation:bark .25s steps(3)}
+  @keyframes bark{30%{transform:translateY(-3px) rotate(-1.5deg)}65%{transform:rotate(1deg)}}
   h1{margin:10px 0 0;font-size:clamp(34px,9vw,64px);font-weight:400;line-height:1.1}
   .tag{margin:6px 0 0;color:var(--pen);font-size:clamp(20px,5vw,28px)}
   .lead{max-width:30em;margin:20px auto 28px;color:var(--dim)}
@@ -62,10 +62,8 @@
     background:linear-gradient(45deg,#0000 42%,var(--pen) 0 58%,#0000 0),linear-gradient(-45deg,#0000 42%,var(--pen) 0 58%,#0000 0);
   }
 
-  /* loom beadwork: round beads in diagonal colour bands */
-  .beads{height:40px;margin:0 auto 26px;max-width:480px;
-    background:repeating-linear-gradient(45deg,#f4f4f4 0 14px,#c8324a 0 28px,#2f9478 0 42px,#2c4fd6 0 56px,#f4f4f4 0 70px,#2f9478 0 84px);
-    -webkit-mask:radial-gradient(circle,#000 58%,#0000 62%) 0 0/10px 10px;mask:radial-gradient(circle,#000 58%,#0000 62%) 0 0/10px 10px}
+  /* a strip of loom beadwork, drawn bead by bead (img/beads.svg) */
+  .beads{height:56px;margin:0 0 26px;background:url(img/beads.svg) center/auto 100% repeat-x}
   .events{margin:0;padding:0;list-style:none;display:grid;gap:22px}
   .events li{padding:18px 22px}
   .events h3{margin:0;font-size:clamp(26px,6.5vw,34px);font-weight:400;line-height:1.2}
@@ -127,7 +125,7 @@
   <div class="beads" aria-hidden="true"></div>
   <ul class="events">
     <!-- EVENTS: one <li> each, soonest first. data-end = the day it happens (YYYY-MM-DD); it hides itself the day after. -->
-    <li class="frame" data-end="2026-11-19"><h3>Moonlight Magic</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building</p></li>
+    <li class="frame" data-end="2026-11-19"><h3>Moonlight Magic Indigenous Artisan Market</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building, 602 Queen Street East, Sault Ste. Marie</p><p><a href="https://www.facebook.com/events/29502466852697274/">Event page on Facebook</a></p></li>
     <!-- /EVENTS -->
   </ul>
   <p class="sub" id="noevents" hidden>Nothing booked right now. Check back soon.</p>
@@ -157,6 +155,8 @@
         <h3>Feather dreamcatcher</h3><p>Wrapped hoop, beaded web, hanging feathers.</p></li>
     <li class="frame"><img src="img/dreamcatcher-beaded.jpg" alt="Mini dreamcatcher on a cord-wrapped ring with seed beads" width="900" height="900" loading="lazy">
         <h3>Mini beaded dreamcatcher</h3><p>Cord-wrapped ring with gold, gunmetal and clear seed beads.</p></li>
+    <li class="frame"><img src="img/loomwork.jpg" alt="Beaded band in white, red, green and blue on a bead loom" width="900" height="900" loading="lazy">
+        <h3>Loomwork</h3><p>Loom-beaded bands, here still on the loom.</p></li>
     <!-- /LISTINGS -->
   </ul>
 </section>
@@ -169,6 +169,7 @@
     <div><h3>Drumsticks</h3><p>Hide-headed beaters with handles wrapped in your colours.</p></div>
     <div><h3>Small goods</h3><p>Keychains, tags and little gifts.</p></div>
     <div><h3>Magnets &amp; dreamcatchers</h3><p>Medicine wheel magnets and dreamcatchers, made to order.</p></div>
+    <div><h3>Loomwork</h3><p>Loom-beaded bands and strips in your colours and pattern.</p></div>
     <div><h3>Repairs</h3><p>Torn stitching, worn laces, broken snaps and tired leather goods mended. Send a photo and I'll tell you what I can do.</p></div>
     <div><h3>Your choices</h3><p>Leather colour, stitching, fringe, beads and hardware.</p></div>
     <div><h3>Something else</h3><p>If it can be cut and stitched from leather, ask. I'm happy to talk it through.</p></div>
