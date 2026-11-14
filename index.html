@@ -105,6 +105,8 @@
   .cols{display:grid;gap:6px 36px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
   .cols h3{margin:14px 0 0;font-size:25px;font-weight:400;color:var(--pen)}
   .cols h3::before{content:"x ";color:var(--ink)}
+  .cols .wide{grid-column:1/-1;display:grid;gap:4px 36px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));align-items:center;margin-top:18px}
+  .cols .pic{display:block;width:100%;height:auto}
   .cols p{margin:0;color:var(--dim);font-size:20px;line-height:1.4}
 
   #contact{text-align:center}
@@ -144,7 +146,7 @@
   <div class="beads" aria-hidden="true"></div>
   <ul class="events">
     <!-- EVENTS: one <li> each, soonest first. data-end = the day it happens (YYYY-MM-DD); it hides itself the day after. -->
-    <li class="frame" data-end="2026-11-19"><img src="img/table.jpg" alt="My table: drumsticks, deer hide pouches, lighter cases, keychains, leather bags and a journal laid out" width="1200" height="643"><h3>Moonlight Magic Indigenous Artisan Market</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building, 602 Queen Street East, Sault Ste. Marie</p><p><a href="https://www.facebook.com/events/29502466852697274/">Event page on Facebook</a></p></li>
+    <li class="frame" data-end="2026-11-19"><img src="img/table.jpg" alt="My market table outside, under a striped blanket, with deer hide pouches, drumsticks, lighter cases and a journal" width="1200" height="584"><h3>Moonlight Magic Indigenous Artisan Market</h3><p>Thursday, Nov 19 - 5 to 9 pm</p><p>@ Cree building, 602 Queen Street East, Sault Ste. Marie</p><p><a href="https://www.facebook.com/events/29502466852697274/">Event page on Facebook</a></p></li>
     <!-- /EVENTS -->
   </ul>
   <p class="sub" id="noevents" hidden>Nothing booked right now. Check back soon.</p>
@@ -189,9 +191,9 @@
     <div><h3>Small goods</h3><p>Keychains, tags and little gifts.</p></div>
     <div><h3>Magnets &amp; dreamcatchers</h3><p>Medicine wheel magnets and dreamcatchers, made to order.</p></div>
     <div><h3>Loomwork</h3><p>Loom-beaded bands and strips in your colours and pattern.</p></div>
-    <div><h3>Repairs</h3><p>Torn stitching, worn laces, broken snaps and tired leather goods mended. Send a photo and I'll tell you what I can do.</p></div>
     <div><h3>Your choices</h3><p>Leather colour, stitching, fringe, beads and hardware.</p></div>
     <div><h3>Something else</h3><p>If it can be cut and stitched from leather, ask. I'm happy to talk it through.</p></div>
+    <div class="wide"><div><h3>Repairs</h3><p>Torn stitching, worn laces, broken snaps and tired leather goods mended. Send a photo and I'll tell you what I can do.</p></div><img class="pic" src="img/repair-bench.jpg" alt="My leather repair table: stitching pony, cutting mat, press, tools and a Leather Repair sign" width="1200" height="503" loading="lazy"></div>
   </div>
 </section>
 
