@@ -10,86 +10,124 @@
 <meta property="og:image" content="https://motch.space/img/deerhide-pouch.jpg">
 <title>Ma'iinganz Makes — Handmade Leatherwork</title>
 <style>
+  /* Looks like the doodles: black page, white ink, blue pen, my own handwriting,
+     wobbly drawn frames and the dither fill from the wolf. */
+  @font-face{font-family:"Mitchel Hand";src:url(fonts/MitchelHand.ttf) format("truetype");font-display:swap}
   :root{
-    --bg:#16110d; --panel:#211912; --line:#3a2c20;
-    --text:#e9dfd1; --dim:#a8977f; --tan:#d9a441; --hide:#f4efe6;
+    --bg:#000; --ink:#f4f4f4; --dim:#a9a9a9; --pen:#86a3ff;
+    --dither:conic-gradient(var(--ink) 25%,#0000 0 50%,var(--ink) 0 75%,#0000 0) 0 0/4px 4px;
   }
   *{box-sizing:border-box}
   html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
   body{
-    margin:0;background:var(--bg);color:var(--text);
-    font:17px/1.65 Georgia,"Times New Roman",serif;
-    padding:0 max(18px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(18px,env(safe-area-inset-left));
+    margin:0;background:var(--bg);color:var(--ink);
+    font:21px/1.5 "Mitchel Hand",ui-monospace,Menlo,Consolas,monospace;
+    padding:0 max(16px,env(safe-area-inset-right)) env(safe-area-inset-bottom) max(16px,env(safe-area-inset-left));
   }
-  .wrap{max-width:980px;margin:0 auto}
-  a{color:var(--tan)}
-  a:focus-visible{outline:2px solid var(--tan);outline-offset:3px}
+  .wrap{max-width:1000px;margin:0 auto}
+  a{color:var(--pen)}
+  a:focus-visible{outline:3px solid var(--pen);outline-offset:4px}
+  svg.defs{position:absolute;width:0;height:0}
 
-  header{text-align:center;padding:44px 0 36px;border-bottom:1px solid var(--line)}
-  header img{width:150px;height:auto;filter:invert(1);mix-blend-mode:screen;image-rendering:pixelated}
-  h1{margin:14px 0 4px;font-size:clamp(30px,7vw,48px);font-weight:400;letter-spacing:.04em}
-  .tag{margin:0;color:var(--tan);font-size:13px;letter-spacing:.3em;text-transform:uppercase;
-       font-family:ui-sans-serif,system-ui,sans-serif}
-  .lead{max-width:36em;margin:22px auto 26px;color:var(--dim)}
+  /* a hand-drawn frame: a plain border pushed around by the wobble filter */
+  .frame{position:relative}
+  .frame::before{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:1;
+    border:3px solid var(--ink);border-radius:5px;filter:url(#wob);
+  }
+
+  header{text-align:center;padding:40px 0 30px}
+  header img{width:min(300px,70%);height:auto;filter:invert(1);mix-blend-mode:screen;image-rendering:pixelated}
+  h1{margin:10px 0 0;font-size:clamp(34px,9vw,64px);font-weight:400;line-height:1.1}
+  .tag{margin:6px 0 0;color:var(--pen);font-size:clamp(20px,5vw,28px)}
+  .lead{max-width:30em;margin:20px auto 28px;color:var(--dim)}
   .btn{
-    display:inline-block;padding:12px 26px;border:1px solid var(--tan);border-radius:3px;
-    color:var(--bg);background:var(--tan);text-decoration:none;
-    font:600 14px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;
+    position:relative;display:inline-block;padding:10px 26px;margin:0 6px 6px 0;
+    background:var(--ink);color:#000;text-decoration:none;font-size:24px;
   }
-  .btn:hover{background:transparent;color:var(--tan)}
+  .btn::after{content:"";position:absolute;inset:6px -6px -6px 6px;background:var(--dither);z-index:-1}
+  .btn:hover{background:var(--pen)}
+  header,section,footer{isolation:isolate}
 
-  section{padding:44px 0;border-bottom:1px solid var(--line)}
-  h2{margin:0 0 6px;font-size:26px;font-weight:400;letter-spacing:.03em}
-  .sub{margin:0 0 24px;color:var(--dim)}
+  /* the little x and dot boxes from the journal covers */
+  .boxes{display:flex;justify-content:center;gap:10px;margin:0;padding:0;list-style:none;filter:url(#wob)}
+  .boxes li{width:22px;height:22px;border:3px solid var(--pen);position:relative}
+  .boxes li::after{content:"";position:absolute;inset:5px;background:var(--pen);border-radius:50%}
+  .boxes li:nth-child(3n+1)::after{
+    inset:1px;border-radius:0;
+    background:linear-gradient(45deg,#0000 42%,var(--pen) 0 58%,#0000 0),linear-gradient(-45deg,#0000 42%,var(--pen) 0 58%,#0000 0);
+  }
 
-  .grid{display:grid;gap:18px;margin:0;padding:0;list-style:none;
+  section{padding:40px 0}
+  h2{margin:0;font-size:clamp(30px,7vw,42px);font-weight:400}
+  h2::after{content:"";display:block;width:5.5em;max-width:100%;height:8px;margin-top:2px;background:var(--dither)}
+  .sub{margin:10px 0 26px;color:var(--dim)}
+
+  .grid{display:grid;gap:30px 26px;margin:0;padding:0;list-style:none;
         grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
-  .grid li{background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow:hidden}
-  .grid img{display:block;width:100%;height:auto;aspect-ratio:1;background:var(--hide)}
-  .grid h3{margin:0;padding:14px 16px 0;font-size:18px;font-weight:400}
-  .grid p{margin:4px 16px 16px;font-size:15px;line-height:1.5;color:var(--dim)}
+  .grid li{padding:10px 10px 4px}
+  .grid li:nth-child(odd){transform:rotate(-.7deg)}
+  .grid li:nth-child(even){transform:rotate(.6deg)}
+  .grid li:nth-child(3n){transform:rotate(1deg)}
+  .grid img{display:block;width:100%;height:auto;aspect-ratio:1;background:#fff}
+  .grid h3{margin:10px 4px 0;font-size:26px;font-weight:400;line-height:1.2}
+  .grid p{margin:2px 4px 10px;font-size:19px;line-height:1.35;color:var(--dim)}
 
-  .cols{display:grid;gap:10px 40px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
-  .cols h3{margin:14px 0 2px;font-size:18px;font-weight:400;color:var(--tan)}
-  .cols p{margin:0;color:var(--dim);font-size:16px}
+  .cols{display:grid;gap:6px 36px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+  .cols h3{margin:14px 0 0;font-size:25px;font-weight:400;color:var(--pen)}
+  .cols h3::before{content:"x ";color:var(--ink)}
+  .cols p{margin:0;color:var(--dim);font-size:20px;line-height:1.4}
 
-  #contact{text-align:center;border-bottom:0}
-  #contact .mail{display:block;margin:6px 0 22px;font-size:clamp(20px,5.5vw,30px);word-break:break-word}
-  #contact ul{display:inline-block;text-align:left;margin:0 0 26px;padding-left:1.2em;color:var(--dim)}
-  footer{padding:26px 0 36px;text-align:center;color:var(--dim);font-size:14px;border-top:1px solid var(--line)}
+  #contact{text-align:center}
+  #contact h2::after{margin-inline:auto}
+  #contact .note{display:inline-block;padding:22px 26px;margin-top:6px;max-width:100%}
+  #contact .mail{display:block;font-size:clamp(24px,7vw,40px);word-break:break-word}
+  #contact ul{display:inline-block;text-align:left;margin:14px 0 22px;padding:0;list-style:none;color:var(--dim)}
+  #contact li::before{content:"- "}
+  footer{padding:30px 0 40px;text-align:center;color:var(--dim)}
+  footer p{margin:14px 0 0}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
 <body>
+<svg class="defs" aria-hidden="true"><filter id="wob" x="-5%" y="-5%" width="110%" height="110%">
+  <feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="2" seed="7"/>
+  <feDisplacementMap in="SourceGraphic" scale="6"/>
+</filter></svg>
 <div class="wrap">
 
 <header>
-  <img src="img/wolf.png" alt="Little wolf logo" width="616" height="373">
+  <img src="img/wolf.png" alt="Little wolf doodle" width="616" height="373">
   <h1>Ma'iinganz Makes</h1>
-  <p class="tag">Handmade leatherwork</p>
+  <p class="tag">handmade leatherwork</p>
   <p class="lead">Pouches, bags, cases and small goods, cut and stitched by hand, one at a time.
      Everything on this page is my own work, and I take custom orders.</p>
-  <a class="btn" href="#contact">Request a custom order</a>
+  <a class="btn" href="#contact">Ask for a custom order</a>
 </header>
+
+<ul class="boxes" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ul>
 
 <main>
 <section id="work">
   <h2>The work</h2>
   <p class="sub">Real pieces off my bench. Each one is a little different.</p>
   <ul class="grid">
-    <li><img src="img/deerhide-pouch.jpg" alt="Golden deer hide medicine pouch with a long tie" width="900" height="900">
+    <!-- LISTINGS: one <li> per product, newest first. Photos are 900x900 white-background JPGs in img/. No prices. -->
+    <li class="frame"><img src="img/deerhide-pouch.jpg" alt="Golden deer hide medicine pouch with a long tie" width="900" height="900">
         <h3>Medicine pouches</h3><p>Real deer hide with a long tie. Small and fringed styles.</p></li>
-    <li><img src="img/drumsticks.jpg" alt="Three drumsticks with deer hide heads and wrapped handles" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/drumsticks.jpg" alt="Three drumsticks with deer hide heads and wrapped handles" width="900" height="900" loading="lazy">
         <h3>Drumsticks</h3><p>Deer hide heads on painted, wrapped handles.</p></li>
-    <li><img src="img/envelope-pouch.jpg" alt="Grey leather envelope pouch with whip-stitched edges and a bead toggle" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/envelope-pouch.jpg" alt="Grey leather envelope pouch with whip-stitched edges and a bead toggle" width="900" height="900" loading="lazy">
         <h3>Envelope pouch</h3><p>Grey leather, whip-stitched edges, bead toggle.</p></li>
-    <li><img src="img/snap-pouch.jpg" alt="Two-tone leather pouch with a brass snap flap" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/snap-pouch.jpg" alt="Two-tone leather pouch with a brass snap flap" width="900" height="900" loading="lazy">
         <h3>Snap flap pouch</h3><p>Two-tone leather with a brass snap.</p></li>
-    <li><img src="img/drawstring-bag.jpg" alt="Brown leather drawstring bag with cream lace" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/drawstring-bag.jpg" alt="Brown leather drawstring bag with cream lace" width="900" height="900" loading="lazy">
         <h3>Drawstring bag</h3><p>Brown leather, cream lace.</p></li>
-    <li><img src="img/lighter-cases.jpg" alt="Leather lighter cases in tan, blue, brown and white, some fringed" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/lighter-cases.jpg" alt="Leather lighter cases in tan, blue, brown and white, some fringed" width="900" height="900" loading="lazy">
         <h3>Lighter cases</h3><p>Plain and fringed, in several colours.</p></li>
-    <li><img src="img/fish-keychains.jpg" alt="Blue leather fish keychains with stitched details" width="900" height="900" loading="lazy">
+    <li class="frame"><img src="img/fish-keychains.jpg" alt="Blue leather fish keychains with stitched details" width="900" height="900" loading="lazy">
         <h3>Fish keychains</h3><p>Blue leather with stitched details.</p></li>
+    <!-- /LISTINGS -->
   </ul>
 </section>
 
@@ -109,17 +147,22 @@
 <section id="contact">
   <h2>Contact me</h2>
   <p class="sub">Every order starts with an email.</p>
-  <a class="mail" href="mailto:orders@motch.space?subject=Custom%20leather%20order">orders@motch.space</a>
-  <ul>
-    <li>What you'd like made</li>
-    <li>Rough size, colours and any details</li>
-    <li>When you need it by</li>
-  </ul>
-  <div><a class="btn" href="mailto:orders@motch.space?subject=Custom%20leather%20order">Email me</a></div>
+  <div class="note frame">
+    <a class="mail" href="mailto:orders@motch.space?subject=Custom%20leather%20order">orders@motch.space</a>
+    <ul>
+      <li>What you'd like made</li>
+      <li>Rough size, colours and any details</li>
+      <li>When you need it by</li>
+    </ul>
+    <div><a class="btn" href="mailto:orders@motch.space?subject=Custom%20leather%20order">Email me</a></div>
+  </div>
 </section>
 </main>
 
-<footer>Miigwetch! &middot; Ma'iinganz Makes</footer>
+<footer>
+  <ul class="boxes" aria-hidden="true"><li></li><li></li><li></li><li></li><li></li><li></li><li></li></ul>
+  <p>Miigwetch! - Ma'iinganz Makes</p>
+</footer>
 
 </div>
 </body>
