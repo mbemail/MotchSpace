@@ -228,8 +228,10 @@ let saved = ''; try { saved = localStorage.plain } catch {}
 plain(!!saved)
 a11y.onclick = () => plain(!document.documentElement.classList.contains('plain'))
 // the wolf barks
-const wolf = document.querySelector('.wolf'), bark = new Audio('bark.mp3')
+// my own barks, one picked at random per tap
+const wolf = document.querySelector('.wolf'), barks = [1, 2, 3, 4, 5].map(n => new Audio('sfx/bark' + n + '.mp3'))
 wolf.onclick = () => {
+  const bark = barks[Math.floor(Math.random() * barks.length)]
   bark.currentTime = 0; bark.play().catch(() => {})
   wolf.classList.remove('bark'); void wolf.offsetWidth; wolf.classList.add('bark')
 }
