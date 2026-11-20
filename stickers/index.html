@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sticker Review</title>
+<style>
+  :root {
+    --bg: #17151c; --panel: #221f2a; --ink: #f4f1ea; --muted: #a39fb0;
+    --pass: #3ccf7a; --fail: #ff5a6a; --fix: #ffc23d; --accent: #8f7cff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overscroll-behavior: none; }
+  body { display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 16px 4px; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  #count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #bar { height: 4px; background: #2e2a38; margin: 4px 16px 0; border-radius: 2px; overflow: hidden; }
+  #bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
+  #sync { font-size: 12px; color: var(--muted); padding: 2px 16px; min-height: 18px; }
+
+  main { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+    padding: 8px 16px; min-height: 0; }
+  #stack { position: absolute; inset: 8px 16px; }
+  #stack:empty { display: none; }
+  .card { position: absolute; inset: 0; margin: auto; width: min(100%, 440px); height: min(100%, 640px);
+    background: var(--panel); border-radius: 22px; box-shadow: 0 12px 40px #0008;
+    display: flex; flex-direction: column; overflow: hidden; touch-action: none; user-select: none;
+    transition: transform .3s ease, opacity .3s ease; will-change: transform; }
+  .card.behind { transform: scale(.95) translateY(14px); opacity: .55; pointer-events: none; }
+  .card.dragging { transition: none; }
+  .art { flex: 1; min-height: 0; position: relative; cursor: pointer;
+    background: repeating-conic-gradient(#3a3546 0 25%, #302c3a 0 50%) 0 0 / 22px 22px; }
+  .art img { position: absolute; inset: 14px; width: calc(100% - 28px); height: calc(100% - 28px);
+    object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
+  .art .photo { opacity: 0; transition: opacity .2s; background: #000; }
+  .art.show-photo .photo { opacity: 1; }
+  .art.show-photo .vec { opacity: 0; }
+  .flip { position: absolute; top: 10px; left: 10px; font-size: 12px; background: #000a; color: #fff;
+    padding: 4px 9px; border-radius: 999px; pointer-events: none; }
+  .stamp { position: absolute; top: 24px; font-size: 34px; font-weight: 900; letter-spacing: 2px;
+    padding: 4px 14px; border: 5px solid; border-radius: 10px; opacity: 0; pointer-events: none; }
+  .stamp.pass { left: 22px; color: var(--pass); transform: rotate(-14deg); }
+  .stamp.fail { right: 22px; color: var(--fail); transform: rotate(14deg); }
+  .meta { padding: 12px 16px 14px; }
+  .meta h2 { margin: 0 0 2px; font-size: 20px; text-transform: capitalize; }
+  .meta p { margin: 0; color: var(--muted); font-size: 14px; }
+  .meta .warn { color: var(--fix); margin-top: 6px; }
+  .meta a { color: var(--accent); font-size: 13px; }
+  .prev { margin-top: 6px; font-size: 13px; }
+  .prev b.pass { color: var(--pass); } .prev b.fail { color: var(--fail); } .prev b.fix { color: var(--fix); }
+
+  nav { display: flex; justify-content: center; align-items: center; gap: 22px; padding: 10px 0 18px; }
+  nav button { border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+    background: var(--panel); box-shadow: 0 4px 16px #0006; color: var(--ink); transition: transform .1s; }
+  nav button:active { transform: scale(.9); }
+  #bFail, #bPass { width: 70px; height: 70px; font-size: 30px; }
+  #bFail { color: var(--fail); } #bPass { color: var(--pass); }
+  #bNote { width: 56px; height: 56px; font-size: 22px; color: var(--fix); }
+  #bUndo { width: 44px; height: 44px; font-size: 18px; color: var(--muted); }
+  nav small { display: block; font-size: 10px; margin-top: -4px; }
+  .hint { text-align: center; color: var(--muted); font-size: 12px; margin-top: -10px; padding-bottom: 8px; }
+
+  dialog { border: 0; border-radius: 18px; background: var(--panel); color: var(--ink);
+    width: min(92vw, 440px); padding: 18px; }
+  dialog::backdrop { background: #000a; }
+  dialog h3 { margin: 0 0 8px; }
+  textarea { width: 100%; min-height: 110px; border-radius: 12px; border: 1px solid #443f50;
+    background: #17151c; color: var(--ink); padding: 10px; font: inherit; resize: vertical; }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .row button { flex: 1; border: 0; border-radius: 12px; padding: 12px; font: inherit; font-weight: 600; cursor: pointer; }
+  .b-fail { background: var(--fail); color: #210; } .b-fix { background: var(--fix); color: #210; }
+  .b-pass { background: var(--pass); color: #021; } .b-ghost { background: #2e2a38; color: var(--ink); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chips button { background: #2e2a38; color: var(--ink); border: 0; border-radius: 999px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+
+  #done { display: none; flex-direction: column; gap: 10px; width: min(92vw, 560px); max-height: 100%; overflow: auto; }
+  #done.on { display: flex; }
+  #done ul { list-style: none; padding: 0; margin: 0; }
+  #done li { display: flex; gap: 10px; align-items: center; padding: 8px; background: var(--panel); border-radius: 12px; margin-bottom: 6px; }
+  #done li img { width: 54px; height: 54px; object-fit: contain; background: #302c3a; border-radius: 8px; }
+  #done li div { flex: 1; font-size: 14px; }
+  #done li b { text-transform: uppercase; font-size: 12px; }
+  #done pre { white-space: pre-wrap; background: #0e0d12; padding: 12px; border-radius: 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sticker review</h1>
+  <span id="count"></span>
+</header>
+<div id="bar"><i></i></div>
+<div id="sync">Loading…</div>
+
+<main>
+  <div id="stack"></div>
+  <section id="done">
+    <h2 style="margin:0">All reviewed</h2>
+    <p style="margin:0;color:var(--muted)">Your answers are saved for Claude. You can also copy them below.</p>
+    <ul id="summary"></ul>
+    <pre id="exportText"></pre>
+    <div class="row">
+      <button class="b-ghost" id="copyBtn">Copy feedback</button>
+      <button class="b-ghost" id="againBtn">Review again</button>
+    </div>
+  </section>
+</main>
+
+<nav id="controls">
+  <button id="bUndo" title="Undo (Backspace)">↶</button>
+  <button id="bFail" title="Fail (←)">✕</button>
+  <button id="bNote" title="Comment (C)">✎</button>
+  <button id="bPass" title="Pass (→)">✓</button>
+</nav>
+<div class="hint" id="hint">Swipe right to pass, left to fail. Tap the art to see the original photo.</div>
+
+<dialog id="noteDlg">
+  <form method="dialog" id="noteForm">
+    <h3 id="noteTitle">What should change?</h3>
+    <textarea id="noteText" placeholder="e.g. keep the paper texture, thicker border, wrong purple…"></textarea>
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <button type="button" class="b-fail" data-v="fail">Fail</button>
+      <button type="button" class="b-fix" data-v="fix">Fix this</button>
+      <button type="button" class="b-pass" data-v="pass">Pass</button>
+    </div>
+    <div class="row"><button type="button" class="b-ghost" id="noteCancel">Cancel</button></div>
+  </form>
+</dialog>
+
+<script>
+const ROUND = "r1";
+const CHIPS = ["Colors are off", "Lost detail", "Too smooth", "Too rough / specks", "Border too thick",
+  "Border too thin", "Use my original cut shape", "Text is wrong", "Keep the texture", "Make it bigger"];
+
+let items = [];
+let idx = 0;
+const answers = {};           // id -> {verdict, note, at}
+const history = [];           // stack of ids for undo
+let db = null;
+
+const $ = s => document.querySelector(s);
+const sync = msg => { $("#sync").textContent = msg; };
+
+function store() {
+  try { localStorage.setItem("stickerReview:" + ROUND, JSON.stringify(answers)); } catch (e) {}
+}
+function restoreLocal() {
+  try { Object.assign(answers, JSON.parse(localStorage.getItem("stickerReview:" + ROUND) || "{}")); } catch (e) {}
+}
+
+async function save(id) {
+  store();
+  if (!db) return;
+  const a = answers[id];
+  try {
+    if (a) await db.doc(`feedback/${ROUND}-${id}`).set({ id, round: ROUND, ...a });
+    else await db.doc(`feedback/${ROUND}-${id}`).delete();
+    sync("Saved for Claude ✓");
+  } catch (e) {
+    sync("Saved on this device only (" + (e && e.message ? e.message : "no connection") + ")");
+  }
+}
+
+function card(item, behind) {
+  const el = document.createElement("div");
+  el.className = "card" + (behind ? " behind" : "");
+  const prev = answers[item.id];
+  el.innerHTML = `
+    <div class="art">
+      <img class="photo" src="${item.photo}" alt="original photo">
+      <img class="vec" src="${item.svg}" alt="${item.title} vector">
+      <span class="flip">vector · tap for photo</span>
+      <span class="stamp pass">PASS</span><span class="stamp fail">FAIL</span>
+    </div>
+    <div class="meta">
+      <h2>${item.title}</h2>
+      <p>${item.colors} colors · <a href="${item.svg}" target="_blank" rel="noopener">open SVG</a></p>
+      ${item.note ? `<p class="warn">⚠ ${item.note}</p>` : ""}
+      ${prev ? `<p class="prev">Earlier: <b class="${prev.verdict}">${prev.verdict}</b>${prev.note ? " · " + escapeHtml(prev.note) : ""}</p>` : ""}
+    </div>`;
+  const art = el.querySelector(".art");
+  const flip = el.querySelector(".flip");
+  // listen on the card: pointer capture sends the click to the card, not the art
+  el.addEventListener("click", e => {
+    if (el.dataset.moved === "1") return;
+    if (e.target.closest("a")) return;
+    if (!art.contains(e.target) && e.target !== el) return;
+    if (e.target === el && e.clientY > art.getBoundingClientRect().bottom) return;
+    art.classList.toggle("show-photo");
+    flip.textContent = art.classList.contains("show-photo") ? "photo · tap for vector" : "vector · tap for photo";
+  });
+  if (!behind) dragify(el);
+  return el;
+}
+
+function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function render() {
+  const stack = $("#stack");
+  stack.innerHTML = "";
+  const total = items.length;
+  $("#count").textContent = `${Math.min(idx + 1, total)} / ${total}`;
+  $("#bar i").style.width = (100 * idx / total) + "%";
+  if (idx >= total) { finish(); return; }
+  $("#done").classList.remove("on");
+  $("#controls").style.visibility = "visible";
+  $("#hint").style.visibility = "visible";
+  if (idx + 1 < total) stack.appendChild(card(items[idx + 1], true));
+  stack.appendChild(card(items[idx], false));
+}
+
+function dragify(el) {
+  let sx = 0, sy = 0, dx = 0, dy = 0, down = false;
+  const pass = el.querySelector(".stamp.pass"), fail = el.querySelector(".stamp.fail");
+  el.addEventListener("pointerdown", e => {
+    if (e.target.closest("a")) return;
+    down = true; sx = e.clientX; sy = e.clientY; dx = dy = 0; el.dataset.moved = "0";
+    el.classList.add("dragging"); el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener("pointermove", e => {
+    if (!down) return;
+    dx = e.clientX - sx; dy = e.clientY - sy;
+    if (Math.abs(dx) > 6) el.dataset.moved = "1";
+    el.style.transform = `translate(${dx}px, ${dy * 0.3}px) rotate(${dx / 18}deg)`;
+    pass.style.opacity = Math.max(0, Math.min(1, dx / 110));
+    fail.style.opacity = Math.max(0, Math.min(1, -dx / 110));
+  });
+  const end = () => {
+    if (!down) return;
+    down = false; el.classList.remove("dragging");
+    if (dx > 110) decide("pass");
+    else if (dx < -110) decide("fail");
+    else { el.style.transform = ""; pass.style.opacity = fail.style.opacity = 0; }
+    setTimeout(() => { el.dataset.moved = "0"; }, 0);
+  };
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+
+function decide(verdict, note) {
+  const item = items[idx];
+  if (!item) return;
+  const old = answers[item.id];
+  answers[item.id] = { verdict, note: note ?? (old && old.verdict === verdict ? old.note : ""), at: new Date().toISOString() };
+  history.push({ id: item.id, old });
+  save(item.id);
+  const el = $("#stack .card:not(.behind)");
+  if (el) {
+    const dir = verdict === "pass" ? 1 : verdict === "fail" ? -1 : 0;
+    el.style.transform = dir ? `translate(${dir * 130}vw, 40px) rotate(${dir * 28}deg)` : "translateY(-120vh)";
+    el.style.opacity = 0;
+  }
+  idx++;
+  setTimeout(render, 260);
+}
+
+function undo() {
+  const h = history.pop();
+  if (!h) return;
+  if (h.old) answers[h.id] = h.old; else delete answers[h.id];
+  save(h.id);
+  idx = Math.max(0, items.findIndex(i => i.id === h.id));
+  render();
+}
+
+function openNote() {
+  const item = items[idx];
+  if (!item) return;
+  $("#noteTitle").textContent = `Notes on “${item.title}”`;
+  $("#noteText").value = answers[item.id]?.note || "";
+  $("#noteDlg").showModal();
+  setTimeout(() => $("#noteText").focus(), 50);
+}
+
+function exportText() {
+  return items.map(i => {
+    const a = answers[i.id];
+    return `${i.id}: ${a ? a.verdict.toUpperCase() : "SKIPPED"}${a && a.note ? " — " + a.note : ""}`;
+  }).join("\n");
+}
+
+function finish() {
+  $("#stack").innerHTML = "";
+  $("#controls").style.visibility = "hidden";
+  $("#hint").style.visibility = "hidden";
+  $("#bar i").style.width = "100%";
+  $("#count").textContent = `${items.length} / ${items.length}`;
+  const ul = $("#summary");
+  ul.innerHTML = "";
+  for (const i of items) {
+    const a = answers[i.id];
+    const li = document.createElement("li");
+    const v = a ? a.verdict : "skipped";
+    const color = { pass: "var(--pass)", fail: "var(--fail)", fix: "var(--fix)" }[v] || "var(--muted)";
+    li.innerHTML = `<img src="${i.svg}" alt=""><div><span style="text-transform:capitalize">${i.title}</span><br>
+      <b style="color:${color}">${v}</b>${a && a.note ? " · " + escapeHtml(a.note) : ""}</div>`;
+    li.style.cursor = "pointer";
+    li.addEventListener("click", () => { idx = items.indexOf(i); render(); });
+    ul.appendChild(li);
+  }
+  $("#exportText").textContent = exportText();
+  $("#done").classList.add("on");
+}
+
+// controls
+$("#bPass").onclick = () => decide("pass");
+$("#bFail").onclick = () => decide("fail");
+$("#bNote").onclick = openNote;
+$("#bUndo").onclick = undo;
+$("#noteCancel").onclick = () => $("#noteDlg").close();
+document.querySelectorAll("#noteForm [data-v]").forEach(b => b.onclick = () => {
+  const note = $("#noteText").value.trim();
+  $("#noteDlg").close();
+  decide(b.dataset.v, note);
+});
+$("#chips").innerHTML = CHIPS.map(c => `<button type="button">${c}</button>`).join("");
+$("#chips").addEventListener("click", e => {
+  if (e.target.tagName !== "BUTTON") return;
+  const t = $("#noteText");
+  t.value = (t.value ? t.value.replace(/\s*$/, "") + ". " : "") + e.target.textContent;
+  t.focus();
+});
+$("#copyBtn").onclick = async () => {
+  try { await navigator.clipboard.writeText(exportText()); $("#copyBtn").textContent = "Copied ✓"; }
+  catch (e) { $("#copyBtn").textContent = "Select the text above to copy"; }
+};
+$("#againBtn").onclick = () => { idx = 0; history.length = 0; render(); };
+document.addEventListener("keydown", e => {
+  if ($("#noteDlg").open) return;
+  if (e.key === "ArrowRight") decide("pass");
+  else if (e.key === "ArrowLeft") decide("fail");
+  else if (e.key === "c" || e.key === "C") { e.preventDefault(); openNote(); }
+  else if (e.key === "Backspace") undo();
+  else if (e.key === " ") { e.preventDefault(); document.querySelector("#stack .card:not(.behind) .art")?.click(); }
+});
+
+// boot
+(async function boot() {
+  restoreLocal();
+  try {
+    items = await (await fetch("manifest.json")).json();
+  } catch (e) {
+    sync("Could not load the sticker list.");
+    return;
+  }
+  // start at the first card without an answer
+  idx = items.findIndex(i => !answers[i.id]);
+  if (idx < 0) idx = items.length;
+  render();
+  sync("Saved on this device");
+
+  if (!window.claude || !window.claude.use) return;
+  const timer = setTimeout(() => sync("Saved on this device only"), 10000);
+  try {
+    db = await window.claude.use("db");
+    clearTimeout(timer);
+    if (!db) { sync("Saved on this device only. Use “Copy feedback” at the end."); return; }
+    const snap = await db.collection("feedback").where("round", "==", ROUND).get();
+    const docs = snap.docs ? snap.docs : snap;
+    let changed = false;
+    for (const d of docs) {
+      const v = typeof d.data === "function" ? d.data() : d;
+      if (v && v.id && !answers[v.id]) { answers[v.id] = { verdict: v.verdict, note: v.note || "", at: v.at }; changed = true; }
+    }
+    if (changed) { store(); idx = items.findIndex(i => !answers[i.id]); if (idx < 0) idx = items.length; render(); }
+    // push anything answered offline
+    for (const id of Object.keys(answers)) save(id);
+    sync("Connected. Each swipe is saved for Claude.");
+  } catch (e) {
+    clearTimeout(timer);
+    sync("Saved on this device only. Use “Copy feedback” at the end.");
+  }
+})();
+</script>
+</body>
+</html>
