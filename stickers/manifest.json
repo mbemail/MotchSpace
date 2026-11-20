@@ -2,8 +2,8 @@
  {
   "id": "hooded-head",
   "title": "hooded head",
-  "svg": "svg/hooded-head.svg?v=2",
-  "photo": "photo/hooded-head.jpg?v=2",
+  "svg": "svg/hooded-head.svg",
+  "photo": "photo/hooded-head.jpg",
   "colors": 3,
   "note": "Read \"coir\" as colour: one flat purple now.",
   "r1": "FIX: Smooth lines, remove coir"
@@ -11,8 +11,8 @@
  {
   "id": "round-face",
   "title": "round face",
-  "svg": "svg/round-face.svg?v=2",
-  "photo": "photo/round-face.jpg?v=2",
+  "svg": "svg/round-face.svg",
+  "photo": "photo/round-face.jpg",
   "colors": 3,
   "note": "",
   "r1": "FIX: Remove texture and colour smooth lines"
@@ -20,8 +20,8 @@
  {
   "id": "ha-creature",
   "title": "\"ha\" creature",
-  "svg": "svg/ha-creature.svg?v=2",
-  "photo": "photo/ha-creature.jpg?v=2",
+  "svg": "svg/ha-creature.svg",
+  "photo": "photo/ha-creature.jpg",
   "colors": 3,
   "note": "",
   "r1": "FIX: Lost top line remove texture and colour smooth lines"
@@ -29,8 +29,8 @@
  {
   "id": "my-feewins",
   "title": "My Feewins",
-  "svg": "svg/my-feewins.svg?v=2",
-  "photo": "photo/my-feewins.jpg?v=2",
+  "svg": "svg/my-feewins.svg",
+  "photo": "photo/my-feewins.jpg",
   "colors": 4,
   "note": "Known miss: the blue tear came out white.",
   "r1": "FIX: Remove texture and colour smooth lines make text thicker"
@@ -38,8 +38,8 @@
  {
   "id": "dress-figure",
   "title": "dress figure",
-  "svg": "svg/dress-figure.svg?v=2",
-  "photo": "photo/dress-figure.jpg?v=2",
+  "svg": "svg/dress-figure.svg",
+  "photo": "photo/dress-figure.jpg",
   "colors": 2,
   "note": "Read \"remove colour\" as one flat purple. Tell me if you meant black only.",
   "r1": "FIX: Lost bottom keep texture, remove colour"
@@ -47,8 +47,8 @@
  {
   "id": "bald-guy",
   "title": "bald guy",
-  "svg": "svg/bald-guy.svg?v=2",
-  "photo": "photo/bald-guy.jpg?v=2",
+  "svg": "svg/bald-guy.svg",
+  "photo": "photo/bald-guy.jpg",
   "colors": 1,
   "note": "",
   "r1": "FIX: Smooth out"
@@ -56,8 +56,8 @@
  {
   "id": "fish",
   "title": "fish",
-  "svg": "svg/fish.svg?v=2",
-  "photo": "photo/fish.jpg?v=2",
+  "svg": "svg/fish.svg",
+  "photo": "photo/fish.jpg",
   "colors": 1,
   "note": "Fins and tail redrawn from the cut paper shape. The punched eye hole is a solid blue eye.",
   "r1": "PASS: Lost fins and tail fucked"
@@ -65,8 +65,8 @@
  {
   "id": "woodland-bird",
   "title": "woodland bird",
-  "svg": "svg/woodland-bird.svg?v=2",
-  "photo": "photo/woodland-bird.jpg?v=2",
+  "svg": "svg/woodland-bird.svg",
+  "photo": "photo/woodland-bird.jpg",
   "colors": 7,
   "note": "Pale pencil fills were flattened into solid tints. Pencil scribbles under the bird were removed.",
   "r1": "FIX: Rotate left 90"
@@ -74,8 +74,8 @@
  {
   "id": "easter-bunny",
   "title": "easter bunny",
-  "svg": "svg/easter-bunny.svg?v=2",
-  "photo": "photo/easter-bunny.jpg?v=2",
+  "svg": "svg/easter-bunny.svg",
+  "photo": "photo/easter-bunny.jpg",
   "colors": 9,
   "note": "Whole bunny now. The egg came out mint green; say if you want it pale yellow. Also: the box credits Jim Oskineegish as the original artist.",
   "r1": "FIX: Bottom cut off fill in if needed"
@@ -83,8 +83,8 @@
  {
   "id": "moon-eyes",
   "title": "moon eyes",
-  "svg": "svg/moon-eyes.svg?v=2",
-  "photo": "photo/moon-eyes.jpg?v=2",
+  "svg": "svg/moon-eyes.svg",
+  "photo": "photo/moon-eyes.jpg",
   "colors": 3,
   "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
   "r1": "FAIL"
@@ -92,8 +92,8 @@
  {
   "id": "stop-sign-guy",
   "title": "Stop sign guy (とまれ)",
-  "svg": "svg/stop-sign-guy.svg?v=2",
-  "photo": "photo/stop-sign-guy.jpg?v=2",
+  "svg": "svg/stop-sign-guy.svg",
+  "photo": "photo/stop-sign-guy.jpg",
   "colors": 1,
   "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
   "r1": "FAIL"
@@ -101,8 +101,8 @@
  {
   "id": "light-of-my-life",
   "title": "You're the light of my life",
-  "svg": "svg/light-of-my-life.svg?v=2",
-  "photo": "photo/light-of-my-life.jpg?v=2",
+  "svg": "svg/light-of-my-life.svg",
+  "photo": "photo/light-of-my-life.jpg",
   "colors": 3,
   "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
   "r1": "FAIL"

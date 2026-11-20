@@ -39,7 +39,7 @@ for n in ORDER:
     cols={c for c in re.findall(r'fill="(#[0-9a-f]{6})"',svg) if c!="#ffffff"}
     ncol = "many" if n=="damage" else len(cols)
     if n in ROUND2:
-        items.append(dict(id=n,title=TITLES.get(n,n.replace("-"," ")),svg=f"svg/{n}.svg?v=2",photo=f"photo/{n}.jpg?v=2",colors=ncol,note=NOTES.get(n,""),r1=R1.get(n,"")))
+        items.append(dict(id=n,title=TITLES.get(n,n.replace("-"," ")),svg=f"svg/{n}.svg",photo=f"photo/{n}.jpg",colors=ncol,note=NOTES.get(n,""),r1=R1.get(n,"")))
 items.sort(key=lambda i: ROUND2.index(i["id"]))
 json.dump(items,open(f"{R}/manifest.json","w"),indent=1,ensure_ascii=False)
 print(len(items),"items")
