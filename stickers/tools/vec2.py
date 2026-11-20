@@ -21,9 +21,9 @@ CFG = {
   "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=150, sigma=2.0),
   "crow":            dict(kind="sticker", k=5),
   "round-face":      dict(kind="sticker", k=5, merge=8, speck=320, sigma=2.4),
-  "ha-creature":     dict(kind="sticker", k=5, merge=16, speck=320, sigma=2.6),
-  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40),
-  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=90),
+  "ha-creature":     dict(kind="sticker", k=5, merge=16, speck=320, sigma=2.6, inside=False),
+  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False),
+  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=90, inside=False),
   "fish":            dict(kind="fish"),
   "damage":          dict(kind="drawing", k=7, merge=6, region="nonwhite", sigma=3.0, speck=400, keep_colors=True),
   "happy-friday":    dict(kind="drawing", k=2, flat=True, pencil=True, ink=(78, 78, 84), erase=[(0, 0.83, 1, 1), (0.90, 0, 1, 1)]),
@@ -274,6 +274,17 @@ def process(name):
     lut = np.array(groups + [-1])
     lbl2 = lut[win]
     lbl2 = absorb_specks(lbl2, int(cfg.get("speck", 60) * scale * scale))
+
+    if cfg["kind"] == "sticker" and cfg.get("inside", True):
+        # colours live inside the black outline; anything outside is paper-edge fringe
+        blk = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+        if blk:
+            bm = np.isin(lbl2, blk).astype(np.uint8)
+            hull = ndi.binary_fill_holes(cv2.morphologyEx(bm, cv2.MORPH_CLOSE, disk(4)))
+            hull = cv2.dilate(hull.astype(np.uint8), disk(2)).astype(bool)
+            for g, (r, c) in roles.items():
+                if r == "color":
+                    lbl2[(lbl2 == g) & ~hull] = -1
 
     extra = None
     if cfg.get("fill"):

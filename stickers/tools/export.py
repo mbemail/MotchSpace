@@ -14,6 +14,7 @@ NOTES={
  "woodland-bird":"Pale pencil fills were flattened into solid tints. Pencil scribbles under the bird were removed.",
  "light-of-my-life":"Hardest one to trace. Check the orange and the thin lines.",
  "pixel-goose":"Rebuilt pixel by pixel on a 15x16 grid.",
+ "my-feewins":"Known miss: the blue tear came out white.",
 }
 items=[]
 for n in ORDER:
