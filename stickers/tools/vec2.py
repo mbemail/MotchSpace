@@ -21,7 +21,7 @@ CFG = {
   "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14, nest=3, close_bottom=0.025),
   "crow":            dict(kind="sticker", k=5),
   "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=17, ring=0.045, islands=300, ring_islands=2500),
-  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=16, text_ink=150, fill_outline=14),
+  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=16, fill_outline=14, eye_ring=(58, 36), lift=True, local_thin=True, text_ink=118),
   "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.33, opt=0.8, nest=11, nest_thicken=5, thin_to_black=14, text_ink=150, islands=600),
   "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=60, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, alpha=1.2, nest=2.2),
   "fish":            dict(kind="fish", nest=3.5, nest_thicken=1),
@@ -38,8 +38,8 @@ CFG = {
 
 # black-and-white-only variants of pieces whose colour version already passed
 CFG.update({
-  "crow-smooth":        dict(CFG["crow"], src="crow", paper_L=150, speck=200, smooth=4.0, nest=14, alpha=1.33, opt=1.0),
-  "dress-figure-sq":    dict(CFG["dress-figure"], src="dress-figure", close_bottom=0.03, square=35, black_below=0.55),
+  "crow-smooth":        dict(CFG["crow"], src="crow", paper_L=150, speck=200, smooth=4.0, nest=14, alpha=1.33, opt=1.0, fill_specks=900),
+  "dress-figure-sq":    dict(CFG["dress-figure"], src="dress-figure", close_bottom=0.05, square=35),
   "f-off-cat-sq":       dict(CFG["f-off-cat"], src="f-off-cat", bottom_line=0.06,
                              erase=CFG["f-off-cat"]["erase"] + [(0.93, 0, 1, 0.62)]),
   "happy-friday-crow":  dict(CFG["happy-friday"], src="happy-friday", erase=[(0, 0.97, 1, 1), (0.90, 0, 1, 1), (0, 0, 1, 0.2), (0, 0, 0.3, 1)],
@@ -181,7 +181,7 @@ def fish(img):
     return lbl, {0: ("paper", None), 1: ("ink", (40, 52, 170))}
 
 
-def nest_smooth(masks, sigma, thicken=0):
+def nest_smooth(masks, sigma, thicken=0, local=False):
     """masks: bottom -> top. Smooth each 'this layer and everything above it' blob, so
     edges get very smooth without seams. Thin parts (text, fine lines) skip the blur."""
     n = len(masks)
@@ -192,6 +192,10 @@ def nest_smooth(masks, sigma, thicken=0):
         mx = np.asarray(ndi.maximum(dt, cc, np.arange(k))) if k > 1 else np.zeros(1)
         mx[0] = 1e9
         t = (mx < sigma * 1.2)[cc] & m
+        if local:
+            # thin by local width, so a thin ring joined to a thick outline still counts as thin
+            lm = cv2.dilate(dt, disk(sigma * 0.9))
+            t = t | (m & (lm < sigma * 0.9))
         if thicken > 0 and t.any():
             t = cv2.dilate(t.astype(np.uint8), disk(thicken)).astype(bool)
         thin.append(t)
@@ -206,7 +210,7 @@ def nest_smooth(masks, sigma, thicken=0):
     return out
 
 
-def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nest_thicken=0):
+def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nest_thicken=0, lift=False, local=False):
     layers = {}
     for g, (role, c) in roles.items():
         if role == "paper":
@@ -236,9 +240,15 @@ def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nes
         c = [int(k[i:i + 2], 16) for i in (1, 3, 5)]
         return -(0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2])
     order = sorted(layers, key=lum)
+    if lift:
+        # draw the main fill first, then the other colours, then ink (hides fill creeping into small shapes)
+        cols_ = [k for k in order if layers[k][0] == "color"]
+        if cols_:
+            mainc = max(cols_, key=lambda k: layers[k][1].sum())
+            order = [mainc] + [k for k in order if k != mainc]
     stack = [("#ffffff", cut, "sticker-border")]
     if nest:
-        sm = nest_smooth([P(layers[k][1]) for k in order], nest, nest_thicken)
+        sm = nest_smooth([P(layers[k][1]) for k in order], nest, nest_thicken, local)
         for key, m in zip(order, sm):
             stack.append((key, m, f"{layers[key][0]}-{key[1:]}"))
         stack = [(c, m[y0:y1, x0:x1], i) for c, m, i in stack]
@@ -467,6 +477,19 @@ def process(name):
         inner = ndi.binary_fill_holes(inner)
         inner = cv2.GaussianBlur(inner.astype(np.float32), (0, 0), R_) > 0.5
         bm = np.isin(lbl2, blk_ids)
+        if cfg.get("eye_ring"):
+            # eye = brightest colour; redraw its ring and keep a strip of fill above it
+            eye_id = max(col_ids_, key=lambda g: chroma_L(roles[g][1])[0])
+            eye = largest(lbl2 == eye_id)
+            eye = cv2.GaussianBlur(eye.astype(np.float32), (0, 0), 4) > 0.5
+            de = cv2.distanceTransform((~eye).astype(np.uint8), cv2.DIST_L2, 5)
+            te, gap = cfg["eye_ring"]
+            inner = inner | (de <= te + gap)
+            # the black pocket around the eye opens onto the outline; close it near the eye only
+            near_eye = de <= te + gap + 130
+            closed = ndi.binary_fill_holes(cv2.morphologyEx(inner.astype(np.uint8), cv2.MORPH_CLOSE, disk(70)))
+            inner = inner | (closed & near_eye)
+            inner = cv2.GaussianBlur(inner.astype(np.float32), (0, 0), 6) > 0.5
         dout = cv2.distanceTransform((~inner).astype(np.uint8), cv2.DIST_L2, 5)
         t = float(np.median(dout[bm & main & ~inner & (dout < 0.05 * max(lbl2.shape))])) * 2
         outer = cv2.GaussianBlur((dout <= t).astype(np.float32), (0, 0), R_ / 2) > 0.5
@@ -475,6 +498,23 @@ def process(name):
         # gaps inside the interior take the fill colour; black inside stays (eye ring etc.)
         hole = inner & (lbl2 == -1)
         reassign_nearest(lbl2, hole, [-1])
+        if cfg.get("eye_ring"):
+            main_col = max([g for g in col_ids_ if g != eye_id], key=lambda g: (lbl2 == g).sum())
+            ins = inner & ~eye
+            lbl2[ins & np.isin(lbl2, blk_ids) & (de > te)] = main_col
+            lbl2[ins & (de <= te)] = blk_ids[0]
+            lbl2[eye] = eye_id
+            # stray black bits left inside the fill
+            bmi = (np.isin(lbl2, blk_ids) & inner & (de > te)).astype(np.uint8)
+            k3, cc3, st3, _ = cv2.connectedComponentsWithStats(bmi, 8)
+            band_ = np.isin(lbl2, blk_ids) & ~inner
+            touch = np.unique(cc3[cv2.dilate(band_.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)])
+            small3 = st3[:, cv2.CC_STAT_AREA] < 4000
+            small3[0] = False; small3[touch] = False
+            lbl2[small3[cc3]] = main_col
+            # colour outside the main shape (bits near the lettering) becomes paper
+            outside = (lbl2 != -1) & ~main & np.isin(lbl2, col_ids_)
+            lbl2[outside] = pg_all[0] if pg_all else -1
     if cfg.get("ring") and blk_ids:
         # outer outline as one clean ellipse ring
         art = lbl2 != -1
@@ -563,6 +603,18 @@ def process(name):
         band = cv2.morphologyEx(band.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)).astype(bool) & art
         lbl2[band] = blk_ids[0]
 
+    if cfg.get("fill_specks") and blk_ids:
+        nb = (lbl2 != -1) & ~np.isin(lbl2, blk_ids)
+        k_, cc_, st_, _ = cv2.connectedComponentsWithStats(nb.astype(np.uint8), 4)
+        for i in range(1, k_):
+            if st_[i, cv2.CC_STAT_AREA] >= cfg["fill_specks"] * scale * scale:
+                continue
+            x, y, w, h = st_[i, :4]
+            sub = cc_[max(0, y - 3):y + h + 3, max(0, x - 3):x + w + 3] == i
+            ring_ = cv2.dilate(sub.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool) & ~sub
+            ln = lbl2[max(0, y - 3):y + h + 3, max(0, x - 3):x + w + 3][ring_]
+            if ln.size and np.isin(ln, blk_ids).mean() > 0.95:
+                lbl2[cc_ == i] = blk_ids[0]
     if cfg.get("black_below") and blk_ids:
         col_ids_ = [g for g, (r, _) in roles.items() if r == "color"]
         yy_ = np.arange(lbl2.shape[0])[:, None]
@@ -592,7 +644,7 @@ def process(name):
     _v.potrace_paths = partial(_orig, alpha=cfg.get("alpha", 1.0), opt=cfg.get("opt", 0.3))
     try:
         out = compose(name, lbl2, roles, extra, cfg.get("margin", 0.045),
-                      cfg.get("nest", 0), cfg.get("nest_thicken", 0))
+                      cfg.get("nest", 0), cfg.get("nest_thicken", 0), cfg.get("lift", False), cfg.get("local_thin", False))
     finally:
         _v.potrace_paths = _orig
     if cfg.get("rotate"):

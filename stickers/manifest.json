@@ -5,17 +5,8 @@
   "svg": "svg/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": "",
-  "note": "Outline rebuilt as one even band around the purple. Nothing outside it.",
-  "r1": "FIX: Leaking everywhere"
- },
- {
-  "id": "round-face",
-  "title": "round face",
-  "svg": "svg/round-face.svg",
-  "photo": "photo/round-face.jpg",
-  "colors": "",
-  "note": "Specks and the black hugging the inside of the ring are gone.",
-  "r1": "FIX: Remove stray black in purple"
+  "note": "Eye ring redrawn on its own, with the purple strip back between it and the head outline.",
+  "r1": "FIX: Lost head line above eye"
  },
  {
   "id": "ha-creature-bw",
@@ -23,8 +14,8 @@
   "svg": "svg-bw/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": 1,
-  "note": "Rebuilt from the new clean colour version.",
-  "r1": "FIX: Trim loose black bits"
+  "note": "Rebuilt from the fixed colour version.",
+  "r1": "FIX: Same issue as colour"
  },
  {
   "id": "dress-figure-bw",
@@ -32,17 +23,8 @@
   "svg": "svg-bw/dress-figure.svg",
   "photo": "photo/dress-figure.jpg",
   "colors": 1,
-  "note": "Bottom filled solid black.",
-  "r1": "FIX: Fill in bottom"
- },
- {
-  "id": "happy-friday-bw",
-  "title": "happy friday (black & white)",
-  "svg": "svg-bw/happy-friday.svg",
-  "photo": "photo/happy-friday.jpg",
-  "colors": 1,
-  "note": "Feet and toes no longer clipped.",
-  "r1": "FIX: Cut off feet"
+  "note": "Purple flame texture back in the body; bottom closed with a black band.",
+  "r1": "FIX: Needs body texture"
  },
  {
   "id": "crow-bw",
@@ -50,7 +32,7 @@
   "svg": "svg-bw/crow.svg",
   "photo": "photo/crow.jpg",
   "colors": 1,
-  "note": "Head line made solid.",
-  "r1": "PASS: Right side of head, make solid line"
+  "note": "White specks inside the black lines filled.",
+  "r1": "FIX: Make top line solid, there are white splotches"
  }
 ]
