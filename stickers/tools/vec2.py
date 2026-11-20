@@ -14,21 +14,21 @@ from vec import (lab, largest, drop_small, disk, flatfield, cluster, potrace_pat
                  hexc, write_svg, tight, border_from_art, INK_BLACK, OUT, W)
 
 CFG = {
-  "stop-sign-guy":   dict(kind="sticker", k=2, group=0.05, thresh=90, dots=260, speck=30, smooth=1.4, alpha=1.15),
-  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, flat_colors=2, smooth=4.5, alpha=1.25),
-  "bald-guy":        dict(kind="sticker", k=2, speck=200, smooth=5.0, alpha=1.3),
-  "hooded-head":     dict(kind="sticker", k=5, flat_colors=2, speck=200, smooth=4.5, alpha=1.3),
-  "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14),
+  "stop-sign-guy":   dict(kind="sticker", k=2, group=0.05, thresh=100, dots=300, speck=30, alpha=1.25, opt=0.5, nest=2.6, nest_thicken=1),
+  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=8, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=12),
+  "bald-guy":        dict(kind="sticker", k=2, speck=200, smooth=5.0, alpha=1.33, opt=0.8, nest=14),
+  "hooded-head":     dict(kind="sticker", k=5, flat_colors=2, speck=200, smooth=4.5, alpha=1.33, opt=0.8, nest=14),
+  "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14, nest=3, close_bottom=0.025),
   "crow":            dict(kind="sticker", k=5),
-  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.3),
-  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.3),
-  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.25),
-  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=120, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, smooth=2.2, thicken=2, alpha=1.2),
-  "fish":            dict(kind="fish"),
+  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=11),
+  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=11, nest_thicken=2),
+  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.33, opt=0.8, nest=11, nest_thicken=5, thin_to_black=14, text_ink=150),
+  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=60, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, alpha=1.2, nest=2.2),
+  "fish":            dict(kind="fish", nest=3.5, nest_thicken=1),
   "damage":          dict(kind="drawing", k=7, merge=6, region="nonwhite", sigma=3.0, speck=400, keep_colors=True),
   "happy-friday":    dict(kind="drawing", k=2, flat=True, pencil=True, ink=(78, 78, 84), erase=[(0, 0.83, 1, 1), (0.90, 0, 1, 1)]),
   "woodland-bird":   dict(kind="drawing", k=6, flat=True, merge=12, fill=True, dark_is_black=True,
-                          erase=[(0.45, 0.93, 1.0, 1.0), (0, 0, 1, 0.05), (0.935, 0, 1, 1)], rotate=-90),
+                          erase=[(0.45, 0.93, 1.0, 1.0), (0.72, 0.86, 1.0, 1.0), (0, 0, 1, 0.05), (0.935, 0, 1, 1)], rotate=-90, fill_chroma=3.5, fill_colors=8),
   "easter-bunny":    dict(kind="drawing", k=7, flat=False, merge=12, fill=True, dark_is_black=True),
   "red-thunderbird": dict(kind="drawing", k=2, flat=True, ink=(214, 44, 56)),
   "f-off-cat":       dict(kind="drawing", k=2, flat=True, ink=INK_BLACK,
@@ -111,7 +111,7 @@ def absorb_specks(lbl, min_area):
     return out
 
 
-def region_fill(lbl2, ink_groups, img2, art_hull, min_area, n_colors=5):
+def region_fill(lbl2, ink_groups, img2, art_hull, min_area, n_colors=5, min_chroma=6):
     """Colored-pencil fills: each closed non-ink shape gets one flat colour."""
     lines = np.isin(lbl2, ink_groups)
     space = art_hull & ~lines
@@ -124,7 +124,7 @@ def region_fill(lbl2, ink_groups, img2, art_hull, min_area, n_colors=5):
     # regions touching the outer hull edge are background paper
     border = cv2.dilate((~art_hull).astype(np.uint8), disk(2)).astype(bool)
     touches = np.bincount(cc[border], minlength=n) > 0
-    pick = (cnt >= min_area) & (chroma > 6) & ~touches
+    pick = (cnt >= min_area) & (chroma > min_chroma) & ~touches
     pick[0] = False
     idx = np.where(pick)[0]
     if len(idx) < 2:
@@ -169,7 +169,32 @@ def fish(img):
     return lbl, {0: ("paper", None), 1: ("ink", (40, 52, 170))}
 
 
-def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045):
+def nest_smooth(masks, sigma, thicken=0):
+    """masks: bottom -> top. Smooth each 'this layer and everything above it' blob, so
+    edges get very smooth without seams. Thin parts (text, fine lines) skip the blur."""
+    n = len(masks)
+    thin = []
+    for m in masks:
+        dt = cv2.distanceTransform(m.astype(np.uint8), cv2.DIST_L2, 5)
+        k, cc = cv2.connectedComponents(m.astype(np.uint8), connectivity=8)
+        mx = np.asarray(ndi.maximum(dt, cc, np.arange(k))) if k > 1 else np.zeros(1)
+        mx[0] = 1e9
+        t = (mx < sigma * 1.2)[cc] & m
+        if thicken > 0 and t.any():
+            t = cv2.dilate(t.astype(np.uint8), disk(thicken)).astype(bool)
+        thin.append(t)
+    out = []
+    for i in range(n):
+        U = np.zeros_like(masks[0]); T = np.zeros_like(masks[0])
+        for j in range(i, n):
+            U |= masks[j]; T |= thin[j]
+        body = U & ~T
+        sm = cv2.GaussianBlur(body.astype(np.float32), (0, 0), sigma) > 0.5
+        out.append(sm | T)
+    return out
+
+
+def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nest_thicken=0):
     layers = {}
     for g, (role, c) in roles.items():
         if role == "paper":
@@ -200,6 +225,12 @@ def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045):
         return -(0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2])
     order = sorted(layers, key=lum)
     stack = [("#ffffff", cut, "sticker-border")]
+    if nest:
+        sm = nest_smooth([P(layers[k][1]) for k in order], nest, nest_thicken)
+        for key, m in zip(order, sm):
+            stack.append((key, m, f"{layers[key][0]}-{key[1:]}"))
+        stack = [(c, m[y0:y1, x0:x1], i) for c, m, i in stack]
+        return write_svg(name, stack, (y1 - y0, x1 - x0), name.replace("-", " ")), order
     for i, key in enumerate(order):
         m = P(layers[key][1])
         later = np.zeros_like(m)
@@ -225,7 +256,11 @@ def process(name):
         lbl, roles = fish(img)
         lbl2 = up(lbl.astype(np.int32))
         lbl2 = absorb_specks(lbl2, 200)
-        return compose(name, lbl2, roles)
+        # smooth the paper outline itself before tracing
+        shape = cv2.GaussianBlur((lbl2 != -1).astype(np.float32), (0, 0), 5) > 0.5
+        lbl2[~shape] = -1
+        lbl2[shape & (lbl2 == -1)] = 0
+        return compose(name, lbl2, roles, nest=cfg.get("nest", 0), nest_thicken=cfg.get("nest_thicken", 0))
 
     paper_mask = None
     if cfg["kind"] == "sticker":
@@ -282,6 +317,17 @@ def process(name):
             cols[gid] = c
             roles[gid] = roles_for({gid: c}, {})[gid]
             groups.append(gid)
+    if cfg.get("text_ink"):
+        # pen lettering on the white paper, outside the main outlined shape
+        blk0 = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+        if blk0:
+            lt = lab(cv2.bilateralFilter(img, 7, 25, 5))[..., 0]
+            bm = largest(np.isin(lbl, blk0))
+            hull = ndi.binary_fill_holes(cv2.morphologyEx(bm.astype(np.uint8), cv2.MORPH_CLOSE, disk(5)))
+            outside = ~cv2.dilate(hull.astype(np.uint8), disk(6)).astype(bool)
+            txt = region & outside & (lt < cfg["text_ink"])
+            txt = drop_small(txt, 15)
+            lbl[txt] = blk0[0]
     if cfg.get("dark_to_black"):
         for g, (r, c) in list(roles.items()):
             if r == "color" and chroma_L(cols[g])[0] < cfg["dark_to_black"]:
@@ -326,20 +372,48 @@ def process(name):
         lbl2 = smooth_pass(lbl2, roles, cfg["smooth"] * scale / 2, cfg.get("thicken", 0) * scale / 2,
                            int(cfg.get("speck", 60) * scale * scale))
 
+    blk_ids = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+    if cfg.get("thin_to_black") and blk_ids:
+        # thin strokes that ended up in the main fill colour (e.g. navy pen lettering) go to black
+        col_ids = [g for g, (r, _) in roles.items() if r == "color"]
+        if col_ids:
+            main = max(col_ids, key=lambda g: (lbl2 == g).sum())
+            same = [g for g in col_ids if roles[g][1] == roles[main][1]]
+            m = np.isin(lbl2, same).astype(np.uint8)
+            dt = cv2.distanceTransform(m, cv2.DIST_L2, 5)
+            k, cc = cv2.connectedComponents(m, connectivity=8)
+            mx = np.asarray(ndi.maximum(dt, cc, np.arange(k))); mx[0] = 1e9
+            lbl2[(mx < cfg["thin_to_black"])[cc] & m.astype(bool)] = blk_ids[0]
+    if cfg.get("close_bottom") and blk_ids:
+        # the sticker was hand-cut through the art; finish the bottom with an outline band
+        pg = [g for g, (r, _) in roles.items() if r == "paper"]
+        art = (lbl2 != -1)
+        cols_ = np.where(art.any(0))[0]
+        bottom = np.full(art.shape[1], -1)
+        bottom[cols_] = art.shape[0] - 1 - np.argmax(art[::-1, cols_], 0)
+        t = int(cfg["close_bottom"] * art.shape[0])
+        yy = np.arange(art.shape[0])[:, None]
+        # only where the bottom edge is low (the cut), not the raised arm etc.
+        low = bottom >= np.percentile(bottom[cols_], 40)
+        band = art & (yy > (bottom - t)[None, :]) & low[None, :]
+        band = cv2.morphologyEx(band.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)).astype(bool) & art
+        lbl2[band] = blk_ids[0]
+
     extra = None
     if cfg.get("fill"):
         ink_groups = [g for g, (r, _) in roles.items() if r != "paper"]
         lines = np.isin(lbl2, ink_groups)
         hull = ndi.binary_fill_holes(cv2.morphologyEx(lines.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)))
         img2 = up(cv2.medianBlur(img, 5), cv2.INTER_LINEAR)
-        extra = region_fill(lbl2, ink_groups, img2, hull, min_area=int(40 * scale * scale))
+        extra = region_fill(lbl2, ink_groups, img2, hull, min_area=int(40 * scale * scale), min_chroma=cfg.get("fill_chroma", 6), n_colors=cfg.get("fill_colors", 5))
     import vec as _v
     from functools import partial
     _orig = getattr(_v, "_potrace_orig", _v.potrace_paths)
     _v._potrace_orig = _orig
     _v.potrace_paths = partial(_orig, alpha=cfg.get("alpha", 1.0), opt=cfg.get("opt", 0.3))
     try:
-        out = compose(name, lbl2, roles, extra, cfg.get("margin", 0.045))
+        out = compose(name, lbl2, roles, extra, cfg.get("margin", 0.045),
+                      cfg.get("nest", 0), cfg.get("nest_thicken", 0))
     finally:
         _v.potrace_paths = _orig
     if cfg.get("rotate"):

@@ -5,8 +5,17 @@
   "svg": "svg/hooded-head.svg",
   "photo": "photo/hooded-head.jpg",
   "colors": 3,
-  "note": "Read \"coir\" as colour: one flat purple now.",
-  "r1": "FIX: Smooth lines, remove coir"
+  "note": "",
+  "r1": "FIX: Smoother, very bumpy outline on left side"
+ },
+ {
+  "id": "moon-eyes",
+  "title": "moon eyes",
+  "svg": "svg/moon-eyes.svg",
+  "photo": "photo/moon-eyes.jpg",
+  "colors": 3,
+  "note": "Purple hourglass and bottom band are back.",
+  "r1": "FIX: Retry it's bad"
  },
  {
   "id": "round-face",
@@ -15,7 +24,7 @@
   "photo": "photo/round-face.jpg",
   "colors": 3,
   "note": "",
-  "r1": "FIX: Remove texture and colour smooth lines"
+  "r1": "FIX: Better, smooth out remaining lines"
  },
  {
   "id": "ha-creature",
@@ -24,7 +33,7 @@
   "photo": "photo/ha-creature.jpg",
   "colors": 3,
   "note": "",
-  "r1": "FIX: Lost top line remove texture and colour smooth lines"
+  "r1": "FIX: Smooth lines"
  },
  {
   "id": "my-feewins",
@@ -32,8 +41,8 @@
   "svg": "svg/my-feewins.svg",
   "photo": "photo/my-feewins.jpg",
   "colors": 4,
-  "note": "Known miss: the blue tear came out white.",
-  "r1": "FIX: Remove texture and colour smooth lines make text thicker"
+  "note": "",
+  "r1": "FIX: Text thicker, smooth lines"
  },
  {
   "id": "dress-figure",
@@ -41,8 +50,8 @@
   "svg": "svg/dress-figure.svg",
   "photo": "photo/dress-figure.jpg",
   "colors": 2,
-  "note": "Read \"remove colour\" as one flat purple. Tell me if you meant black only.",
-  "r1": "FIX: Lost bottom keep texture, remove colour"
+  "note": "The sticker was hand-cut through the art, so I closed the bottom with a black outline.",
+  "r1": "FIX: Just a bit cut off at bottom"
  },
  {
   "id": "bald-guy",
@@ -51,43 +60,7 @@
   "photo": "photo/bald-guy.jpg",
   "colors": 1,
   "note": "",
-  "r1": "FIX: Smooth out"
- },
- {
-  "id": "fish",
-  "title": "fish",
-  "svg": "svg/fish.svg",
-  "photo": "photo/fish.jpg",
-  "colors": 1,
-  "note": "Fins and tail redrawn from the cut paper shape. The punched eye hole is a solid blue eye.",
-  "r1": "PASS: Lost fins and tail fucked"
- },
- {
-  "id": "woodland-bird",
-  "title": "woodland bird",
-  "svg": "svg/woodland-bird.svg",
-  "photo": "photo/woodland-bird.jpg",
-  "colors": 7,
-  "note": "Pale pencil fills were flattened into solid tints. Pencil scribbles under the bird were removed.",
-  "r1": "FIX: Rotate left 90"
- },
- {
-  "id": "easter-bunny",
-  "title": "easter bunny",
-  "svg": "svg/easter-bunny.svg",
-  "photo": "photo/easter-bunny.jpg",
-  "colors": 9,
-  "note": "Whole bunny now. The egg came out mint green; say if you want it pale yellow. Also: the box credits Jim Oskineegish as the original artist.",
-  "r1": "FIX: Bottom cut off fill in if needed"
- },
- {
-  "id": "moon-eyes",
-  "title": "moon eyes",
-  "svg": "svg/moon-eyes.svg",
-  "photo": "photo/moon-eyes.jpg",
-  "colors": 3,
-  "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
-  "r1": "FAIL"
+  "r1": "FIX: Smooth, not so ribbed look"
  },
  {
   "id": "stop-sign-guy",
@@ -95,8 +68,8 @@
   "svg": "svg/stop-sign-guy.svg",
   "photo": "photo/stop-sign-guy.jpg",
   "colors": 1,
-  "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
-  "r1": "FAIL"
+  "note": "Third try. If it still fails, it may need a sharper photo.",
+  "r1": "FIX: Retry"
  },
  {
   "id": "light-of-my-life",
@@ -104,7 +77,196 @@
   "svg": "svg/light-of-my-life.svg",
   "photo": "photo/light-of-my-life.jpg",
   "colors": 3,
-  "note": "Retry with the cleaner method. Fail it again and I'll drop it.",
-  "r1": "FAIL"
+  "note": "Less smoothing on the lettering to keep its detail.",
+  "r1": "FIX: Lost text detail"
+ },
+ {
+  "id": "fish",
+  "title": "fish",
+  "svg": "svg/fish.svg",
+  "photo": "photo/fish.jpg",
+  "colors": 1,
+  "note": "",
+  "r1": "FIX: Make smooth vector"
+ },
+ {
+  "id": "woodland-bird",
+  "title": "woodland bird",
+  "svg": "svg/woodland-bird.svg",
+  "photo": "photo/woodland-bird.jpg",
+  "colors": 11,
+  "note": "Circle is back and filled. The pink body and yellow sun now fill in too.",
+  "r1": "FIX: Bottom circle cut out"
+ },
+ {
+  "id": "crow-bw",
+  "title": "crow (black & white)",
+  "svg": "svg-bw/crow.svg",
+  "photo": "photo/crow.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "hooded-head-bw",
+  "title": "hooded head (black & white)",
+  "svg": "svg-bw/hooded-head.svg",
+  "photo": "photo/hooded-head.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "moon-eyes-bw",
+  "title": "moon eyes (black & white)",
+  "svg": "svg-bw/moon-eyes.svg",
+  "photo": "photo/moon-eyes.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "round-face-bw",
+  "title": "round face (black & white)",
+  "svg": "svg-bw/round-face.svg",
+  "photo": "photo/round-face.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "ha-creature-bw",
+  "title": "\"ha\" creature (black & white)",
+  "svg": "svg-bw/ha-creature.svg",
+  "photo": "photo/ha-creature.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "my-feewins-bw",
+  "title": "My Feewins (black & white)",
+  "svg": "svg-bw/my-feewins.svg",
+  "photo": "photo/my-feewins.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "dress-figure-bw",
+  "title": "dress figure (black & white)",
+  "svg": "svg-bw/dress-figure.svg",
+  "photo": "photo/dress-figure.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "bald-guy-bw",
+  "title": "bald guy (black & white)",
+  "svg": "svg-bw/bald-guy.svg",
+  "photo": "photo/bald-guy.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "stop-sign-guy-bw",
+  "title": "Stop sign guy (とまれ) (black & white)",
+  "svg": "svg-bw/stop-sign-guy.svg",
+  "photo": "photo/stop-sign-guy.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "light-of-my-life-bw",
+  "title": "You're the light of my life (black & white)",
+  "svg": "svg-bw/light-of-my-life.svg",
+  "photo": "photo/light-of-my-life.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "f-off-cat-bw",
+  "title": "F*** off cat (black & white)",
+  "svg": "svg-bw/f-off-cat.svg",
+  "photo": "photo/f-off-cat.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "cat-face-bw",
+  "title": "cat face (black & white)",
+  "svg": "svg-bw/cat-face.svg",
+  "photo": "photo/cat-face.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "red-thunderbird-bw",
+  "title": "red thunderbird (black & white)",
+  "svg": "svg-bw/red-thunderbird.svg",
+  "photo": "photo/red-thunderbird.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "happy-friday-bw",
+  "title": "happy friday (black & white)",
+  "svg": "svg-bw/happy-friday.svg",
+  "photo": "photo/happy-friday.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "fish-bw",
+  "title": "fish (black & white)",
+  "svg": "svg-bw/fish.svg",
+  "photo": "photo/fish.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "woodland-bird-bw",
+  "title": "woodland bird (black & white)",
+  "svg": "svg-bw/woodland-bird.svg",
+  "photo": "photo/woodland-bird.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "easter-bunny-bw",
+  "title": "easter bunny (black & white)",
+  "svg": "svg-bw/easter-bunny.svg",
+  "photo": "photo/easter-bunny.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "damage-bw",
+  "title": "DAMAGE (black & white)",
+  "svg": "svg-bw/damage.svg",
+  "photo": "photo/damage.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
+ },
+ {
+  "id": "pixel-goose-bw",
+  "title": "pixel goose (black & white)",
+  "svg": "svg-bw/pixel-goose.svg",
+  "photo": "photo/pixel-goose.jpg",
+  "colors": 1,
+  "note": "New: black-and-white version.",
+  "r1": ""
  }
 ]

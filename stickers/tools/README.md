@@ -26,3 +26,13 @@ python3 export.py
 ## SVG layers
 
 Each SVG has a `sticker-border` group, which is the white die-cut shape. Each ink color is a separate group on top of it.
+
+## Black-and-white versions
+
+`bw.py` turns the finished color SVGs into one-color versions in `../svg-bw/`:
+
+- Black ink and thin colored lines become black.
+- Colored fill areas become white.
+- DAMAGE gets its own trace of the blue crayon strokes.
+
+Run it after `vec2.py`, then run `export3.py`.
