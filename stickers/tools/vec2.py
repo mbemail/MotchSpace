@@ -49,6 +49,9 @@ CFG.update({
 })
 
 
+OVERLAY = {}
+
+
 def chroma_L(rgb):
     px = np.uint8([[list(rgb)[::-1]]])
     L, a, b = cv2.cvtColor(px, cv2.COLOR_BGR2LAB)[0, 0].astype(float)
@@ -249,6 +252,13 @@ def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nes
     stack = [("#ffffff", cut, "sticker-border")]
     if nest:
         sm = nest_smooth([P(layers[k][1]) for k in order], nest, nest_thicken, local)
+        if name in OVERLAY:
+            oc, om = OVERLAY[name]
+            om = P(om)
+            # widen the pupil a touch so it meets the ring, then clip to the eye's closed area
+            for idx_, k in enumerate(order):
+                if k == oc:
+                    sm[idx_] = sm[idx_] | om
         for key, m in zip(order, sm):
             stack.append((key, m, f"{layers[key][0]}-{key[1:]}"))
         stack = [(c, m[y0:y1, x0:x1], i) for c, m, i in stack]
@@ -481,6 +491,16 @@ def process(name):
             # eye = brightest colour; redraw its ring and keep a strip of fill above it
             eye_id = max(col_ids_, key=lambda g: chroma_L(roles[g][1])[0])
             eye = largest(lbl2 == eye_id)
+            # pupil: black that dips into the eye (inside the eye's closed shape)
+            cs_, _ = cv2.findContours(eye.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            eye_closed = np.zeros(eye.shape, np.uint8)
+            cv2.fillPoly(eye_closed, [cv2.convexHull(max(cs_, key=cv2.contourArea))], 1)
+            eye_closed = eye_closed.astype(bool)
+            pupil = eye_closed & ~eye & np.isin(lbl2, blk_ids)
+            pupil = cv2.morphologyEx(pupil.astype(np.uint8), cv2.MORPH_OPEN, disk(8)).astype(bool)
+            pupil = largest(pupil) if pupil.any() else pupil
+            pupil = cv2.GaussianBlur(pupil.astype(np.float32), (0, 0), 3) > 0.5
+            OVERLAY[name] = (hexc(INK_BLACK), pupil)
             eye = cv2.GaussianBlur(eye.astype(np.float32), (0, 0), 4) > 0.5
             de = cv2.distanceTransform((~eye).astype(np.uint8), cv2.DIST_L2, 5)
             te, gap = cfg["eye_ring"]

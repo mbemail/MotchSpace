@@ -5,8 +5,8 @@
   "svg": "svg/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": "",
-  "note": "Eye ring redrawn on its own, with the purple strip back between it and the head outline.",
-  "r1": "FIX: Lost head line above eye"
+  "note": "Pupil traced on its own and laid back over the eye, so the smoothing can't erase it.",
+  "r1": "FAIL: Lost pupil"
  },
  {
   "id": "ha-creature-bw",
@@ -14,25 +14,7 @@
   "svg": "svg-bw/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": 1,
-  "note": "Rebuilt from the fixed colour version.",
-  "r1": "FIX: Same issue as colour"
- },
- {
-  "id": "dress-figure-bw",
-  "title": "dress figure (black & white)",
-  "svg": "svg-bw/dress-figure.svg",
-  "photo": "photo/dress-figure.jpg",
-  "colors": 1,
-  "note": "Purple flame texture back in the body; bottom closed with a black band.",
-  "r1": "FIX: Needs body texture"
- },
- {
-  "id": "crow-bw",
-  "title": "crow (black & white)",
-  "svg": "svg-bw/crow.svg",
-  "photo": "photo/crow.jpg",
-  "colors": 1,
-  "note": "White specks inside the black lines filled.",
-  "r1": "FIX: Make top line solid, there are white splotches"
+  "note": "Rebuilt from the colour version with the pupil back.",
+  "r1": "FAIL: Lost pupil"
  }
 ]
