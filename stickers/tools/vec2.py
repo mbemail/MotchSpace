@@ -14,22 +14,22 @@ from vec import (lab, largest, drop_small, disk, flatfield, cluster, potrace_pat
                  hexc, write_svg, tight, border_from_art, INK_BLACK, OUT, W)
 
 CFG = {
-  "stop-sign-guy":   dict(kind="sticker", k=2, group=0.05, thresh=90, speck=75),
-  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=250, sigma=2.2),
-  "bald-guy":        dict(kind="sticker", k=2),
-  "hooded-head":     dict(kind="sticker", k=5),
-  "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=150, sigma=2.0),
+  "stop-sign-guy":   dict(kind="sticker", k=2, group=0.05, thresh=90, dots=260, speck=30, smooth=1.4, alpha=1.15),
+  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, flat_colors=2, smooth=4.5, alpha=1.25),
+  "bald-guy":        dict(kind="sticker", k=2, speck=200, smooth=5.0, alpha=1.3),
+  "hooded-head":     dict(kind="sticker", k=5, flat_colors=2, speck=200, smooth=4.5, alpha=1.3),
+  "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14),
   "crow":            dict(kind="sticker", k=5),
-  "round-face":      dict(kind="sticker", k=5, merge=8, speck=320, sigma=2.4),
-  "ha-creature":     dict(kind="sticker", k=5, merge=16, speck=320, sigma=2.6, inside=False),
-  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False),
-  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=90, inside=False),
+  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.3),
+  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.3),
+  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.25),
+  "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=120, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, smooth=2.2, thicken=2, alpha=1.2),
   "fish":            dict(kind="fish"),
   "damage":          dict(kind="drawing", k=7, merge=6, region="nonwhite", sigma=3.0, speck=400, keep_colors=True),
   "happy-friday":    dict(kind="drawing", k=2, flat=True, pencil=True, ink=(78, 78, 84), erase=[(0, 0.83, 1, 1), (0.90, 0, 1, 1)]),
   "woodland-bird":   dict(kind="drawing", k=6, flat=True, merge=12, fill=True, dark_is_black=True,
-                          erase=[(0.45, 0.93, 1.0, 1.0), (0, 0, 1, 0.05), (0.935, 0, 1, 1)]),
-  "easter-bunny":    dict(kind="drawing", k=7, flat=True, merge=12, fill=True, dark_is_black=True, erase=[(0, 0.95, 1, 1)]),
+                          erase=[(0.45, 0.93, 1.0, 1.0), (0, 0, 1, 0.05), (0.935, 0, 1, 1)], rotate=-90),
+  "easter-bunny":    dict(kind="drawing", k=7, flat=False, merge=12, fill=True, dark_is_black=True),
   "red-thunderbird": dict(kind="drawing", k=2, flat=True, ink=(214, 44, 56)),
   "f-off-cat":       dict(kind="drawing", k=2, flat=True, ink=INK_BLACK,
                           erase=[(0.975, 0, 1, 1), (0, 0.5, 0.06, 1), (0.92, 0, 1, 0.12)]),
@@ -50,7 +50,7 @@ def roles_for(cols, cfg):
         L, ch = chroma_L(rgb)
         if cfg.get("fill") and L > 165 and ch < 40:
             roles[g] = ("paper", None)          # pale pencil: handled by region fill
-        elif L > 185 and ch < 18:
+        elif L > cfg.get("paper_L", 185) and ch < 18:
             roles[g] = ("paper", None)
         elif cfg.get("ink") is not None:
             roles[g] = ("ink", cfg["ink"])
@@ -155,11 +155,10 @@ def fish(img):
     """White paper fish with blue pen edges, eye punched through."""
     L = lab(cv2.medianBlur(img, 5))
     l, a, b = L[..., 0], L[..., 1], L[..., 2]
-    paper = (l > 160) & (np.hypot(a - 128, b - 128) < 25)
-    paper = largest(cv2.morphologyEx(paper.astype(np.uint8), cv2.MORPH_OPEN, disk(3)))
-    blue = (b < 112) & (l < 200)
-    shape = paper | (blue & cv2.dilate(paper.astype(np.uint8), disk(8)).astype(bool))
-    shape = cv2.morphologyEx(shape.astype(np.uint8), cv2.MORPH_CLOSE, disk(4)).astype(bool)
+    blue = (b < 116) & (l < 210)
+    paper = (l > 140) & (np.hypot(a - 128, b - 128) < 25)
+    shape = cv2.morphologyEx((paper | blue).astype(np.uint8), cv2.MORPH_OPEN, disk(2))
+    shape = largest(cv2.morphologyEx(shape, cv2.MORPH_CLOSE, disk(3)))
     filled = ndi.binary_fill_holes(shape)
     eye = filled & ~shape
     eye = drop_small(eye, 50)
@@ -258,13 +257,50 @@ def process(name):
 
     if cfg.get("thresh"):
         lv = lab(cv2.bilateralFilter(img, 7, 30, 5))[..., 0]
-        lbl = np.where(lv < cfg["thresh"], 1, 0)
+        ink = lv < cfg["thresh"]
+        if cfg.get("adaptive"):
+            bgl = cv2.GaussianBlur(cv2.morphologyEx(lv, cv2.MORPH_CLOSE, disk(9)), (0, 0), 9)
+            ink &= lv < bgl * cfg["adaptive"]
+        if cfg.get("dots"):
+            ink = remove_dots(ink, cfg["dots"])
+        lbl = np.where(ink, 1, 0)
         lbl[~region] = -1
         cols = {0: (255, 255, 255), 1: INK_BLACK}
     else:
         lbl, cols, _ = cluster(img, region, cfg["k"], cfg.get("merge", 16), cfg.get("pencil"), paper_mask)
     roles = roles_for(cols, cfg)
     groups = list(cols)
+    if cfg.get("rescue"):
+        Lr = lab(cv2.medianBlur(img, 5))
+        chr_ = np.hypot(Lr[..., 1] - 128, Lr[..., 2] - 128)
+        pg = [g for g, (r, _) in roles.items() if r == "paper"]
+        m = drop_small(np.isin(lbl, pg) & (chr_ > cfg["rescue"]) & region, 25)
+        if m.any():
+            gid = max(groups) + 1
+            lbl[m] = gid
+            c = np.median(img[m].astype(float), 0)[::-1]
+            cols[gid] = c
+            roles[gid] = roles_for({gid: c}, {})[gid]
+            groups.append(gid)
+    if cfg.get("dark_to_black"):
+        for g, (r, c) in list(roles.items()):
+            if r == "color" and chroma_L(cols[g])[0] < cfg["dark_to_black"]:
+                roles[g] = ("ink", INK_BLACK)
+    if cfg.get("flat_colors"):
+        roles = flatten_colors(roles, lbl, cfg["flat_colors"])
+    if cfg.get("chroma_split"):
+        # black ink is near-neutral; purple fill is not. Split them by colour strength.
+        blk = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+        def lab_b(c):
+            return cv2.cvtColor(np.uint8([[list(c)[::-1]]]), cv2.COLOR_BGR2LAB)[0, 0].astype(float)[2]
+        pur = [g for g, (r, c) in roles.items() if r == "color" and lab_b(c) < 128]
+        if blk and pur:
+            Lc = lab(cv2.medianBlur(cv2.bilateralFilter(img, 9, 30, 5), 7))
+            chs = np.hypot(Lc[..., 1] - 128, Lc[..., 2] - 128)
+            main = max(pur, key=lambda g: (lbl == g).sum())
+            m = np.isin(lbl, blk + pur)
+            lbl[m & (chs < cfg["chroma_split"])] = blk[0]
+            lbl[m & (chs >= cfg["chroma_split"])] = main
 
     # 2x gaussian vote
     sigma = cfg.get("sigma", 1.6)
@@ -286,6 +322,10 @@ def process(name):
                 if r == "color":
                     lbl2[(lbl2 == g) & ~hull] = -1
 
+    if cfg.get("smooth"):
+        lbl2 = smooth_pass(lbl2, roles, cfg["smooth"] * scale / 2, cfg.get("thicken", 0) * scale / 2,
+                           int(cfg.get("speck", 60) * scale * scale))
+
     extra = None
     if cfg.get("fill"):
         ink_groups = [g for g, (r, _) in roles.items() if r != "paper"]
@@ -293,7 +333,122 @@ def process(name):
         hull = ndi.binary_fill_holes(cv2.morphologyEx(lines.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)))
         img2 = up(cv2.medianBlur(img, 5), cv2.INTER_LINEAR)
         extra = region_fill(lbl2, ink_groups, img2, hull, min_area=int(40 * scale * scale))
-    return compose(name, lbl2, roles, extra, cfg.get("margin", 0.045))
+    import vec as _v
+    from functools import partial
+    _orig = getattr(_v, "_potrace_orig", _v.potrace_paths)
+    _v._potrace_orig = _orig
+    _v.potrace_paths = partial(_orig, alpha=cfg.get("alpha", 1.0), opt=cfg.get("opt", 0.3))
+    try:
+        out = compose(name, lbl2, roles, extra, cfg.get("margin", 0.045))
+    finally:
+        _v.potrace_paths = _orig
+    if cfg.get("rotate"):
+        rotate_svg(out[0], cfg["rotate"])
+    return out
+
+
+def remove_dots(ink, max_area):
+    """Drop small roundish blobs (paper texture) but keep small dashes (elongated)."""
+    n, cc, st, _ = cv2.connectedComponentsWithStats(ink.astype(np.uint8), 8)
+    keep = np.ones(n, bool); keep[0] = False
+    for i in range(1, n):
+        a = st[i, cv2.CC_STAT_AREA]
+        if a >= max_area:
+            continue
+        w, h = st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]
+        elong = max(w, h) / max(1, min(w, h))
+        if a < max_area * 0.25 or elong < 2.2:
+            keep[i] = False
+    return keep[cc]
+
+
+def flatten_colors(roles, lbl, n):
+    """Merge colour groups (never ink) down to n flat colours, weighted by area."""
+    cg = [g for g, (r, _) in roles.items() if r == "color"]
+    if len(cg) <= n:
+        return roles
+    def to_lab(c):
+        return cv2.cvtColor(np.uint8([[list(c)[::-1]]]), cv2.COLOR_BGR2LAB)[0, 0].astype(float)
+    clusters = [([g], to_lab(roles[g][1]), float((lbl == g).sum()) + 1) for g in cg]
+    while len(clusters) > n:
+        best = None
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                d = np.linalg.norm((clusters[i][1] - clusters[j][1]) * np.array([0.5, 1, 1]))
+                if best is None or d < best[0]:
+                    best = (d, i, j)
+        _, i, j = best
+        gi, li, wi = clusters[i]; gj, lj, wj = clusters[j]
+        merged = (gi + gj, (li * wi + lj * wj) / (wi + wj), wi + wj)
+        clusters = [c for k, c in enumerate(clusters) if k not in (i, j)] + [merged]
+    out = dict(roles)
+    for gs, lc, _ in clusters:
+        # the dominant member's colour reads truer than an average
+        dom = max(gs, key=lambda g: chroma_L(roles[g][1])[1])  # most vivid shade
+        for g in gs:
+            out[g] = ("color", roles[dom][1])
+    return out
+
+
+def smooth_pass(lbl2, roles, sigma, thicken, speck):
+    """Second, stronger vote on already-clean labels. Thin ink (text, fine lines) is protected."""
+    ink_ids = [g for g, (r, c) in roles.items() if r == "ink"]
+    inkm = np.isin(lbl2, ink_ids)
+    dt = cv2.distanceTransform(inkm.astype(np.uint8), cv2.DIST_L2, 5)
+    n, cc = cv2.connectedComponents(inkm.astype(np.uint8), connectivity=8)
+    mx = ndi.maximum(dt, cc, np.arange(n)) if n > 1 else np.zeros(1)
+    mx = np.asarray(mx); mx[0] = 1e9
+    thin = (mx < sigma * 1.6)[cc] & inkm
+    thin_lbl = lbl2.copy()
+    # merge identical colours into one id so the vote doesn't split them
+    key = {}
+    for g, (r, c) in roles.items():
+        key[g] = (r, tuple(c) if c is not None else None)
+    ids = sorted(set(np.unique(lbl2)))
+    canon = {}
+    for g in ids:
+        if g == -1:
+            canon[g] = -1; continue
+        k = key.get(g)
+        canon[g] = next((h for h in ids if h != -1 and key.get(h) == k), g)
+    lut_ids = np.array(ids)
+    lbl_c = np.vectorize(canon.get)(lbl2) if len(ids) < 50 else lbl2
+    uniq = sorted(set(np.unique(lbl_c)))
+    votes = [cv2.GaussianBlur((lbl_c == g).astype(np.float32), (0, 0), sigma) for g in uniq]
+    out = np.array(uniq)[np.argmax(np.stack(votes, -1), -1)]
+    # outside stays outside, thin ink restored (optionally thickened onto paper)
+    out[lbl2 == -1] = -1
+    if thin.any():
+        t = thin
+        if thicken > 0:
+            pg = [g for g, (r, _) in roles.items() if r == "paper"]
+            grown = cv2.dilate(thin.astype(np.uint8), disk(thicken)).astype(bool)
+            t = thin | (grown & (np.isin(out, pg) | (out == -1)))
+            t &= cv2.dilate((lbl2 != -1).astype(np.uint8), disk(thicken + 2)).astype(bool)
+        src = np.where(thin, lbl2, -9)
+        # nearest thin label for grown pixels
+        _, (iy, ix) = ndi.distance_transform_edt(~thin, return_indices=True)
+        out[t] = lbl2[iy, ix][t]
+    return absorb_specks(out, speck)
+
+
+def rotate_svg(path, deg):
+    import re, subprocess
+    s = open(path).read()
+    m = re.search(r'viewBox="0 0 (\d+) (\d+)"', s)
+    w, h = int(m.group(1)), int(m.group(2))
+    head_end = s.index("</title>") + len("</title>")
+    body = s[head_end:s.rindex("</svg>")]
+    if deg == -90:
+        tr = f"translate(0,{w}) rotate(-90)"
+    else:
+        tr = f"translate({h},0) rotate(90)"
+    title = s[s.index("<title>"):head_end]
+    s2 = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {h} {w}" width="{h}" height="{w}">\n  {title}\n'
+          f'  <g transform="{tr}">{body}</g>\n</svg>\n')
+    open(path, "w").write(s2)
+    name = os.path.basename(path)[:-4]
+    subprocess.run(["rsvg-convert", "-w", "900", "-o", f"{OUT}/png/{name}.png", path])
 
 
 def goose():
