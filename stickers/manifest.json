@@ -1,102 +1,39 @@
 [
  {
-  "id": "hooded-head",
-  "title": "hooded head",
-  "svg": "svg/hooded-head.svg",
-  "photo": "photo/hooded-head.jpg",
-  "colors": 3,
-  "note": "",
-  "r1": "FIX: Smoother, very bumpy outline on left side"
- },
- {
-  "id": "moon-eyes",
-  "title": "moon eyes",
-  "svg": "svg/moon-eyes.svg",
-  "photo": "photo/moon-eyes.jpg",
-  "colors": 3,
-  "note": "Purple hourglass and bottom band are back.",
-  "r1": "FIX: Retry it's bad"
+  "id": "ha-creature",
+  "title": "\"ha\" creature",
+  "svg": "svg/ha-creature.svg",
+  "photo": "photo/ha-creature.jpg",
+  "colors": "",
+  "note": "Outer outline redrawn as one even, smooth line.",
+  "r1": "FIX: Make just smooth lines, trace over with single line vectors"
  },
  {
   "id": "round-face",
   "title": "round face",
   "svg": "svg/round-face.svg",
   "photo": "photo/round-face.jpg",
-  "colors": 3,
-  "note": "",
-  "r1": "FIX: Better, smooth out remaining lines"
+  "colors": "",
+  "note": "Outer ring is now one clean circle. Specks inside the purple removed.",
+  "r1": "FIX: Make just a smooth line"
  },
  {
-  "id": "ha-creature",
-  "title": "\"ha\" creature",
-  "svg": "svg/ha-creature.svg",
-  "photo": "photo/ha-creature.jpg",
-  "colors": 3,
-  "note": "",
-  "r1": "FIX: Smooth lines"
+  "id": "moon-eyes",
+  "title": "moon eyes",
+  "svg": "svg/moon-eyes.svg",
+  "photo": "photo/moon-eyes.jpg",
+  "colors": "",
+  "note": "Purple removed. Yellow eyes on black only.",
+  "r1": "FIX: Eyes yellow only"
  },
  {
   "id": "my-feewins",
   "title": "My Feewins",
   "svg": "svg/my-feewins.svg",
   "photo": "photo/my-feewins.jpg",
-  "colors": 4,
-  "note": "",
-  "r1": "FIX: Text thicker, smooth lines"
- },
- {
-  "id": "dress-figure",
-  "title": "dress figure",
-  "svg": "svg/dress-figure.svg",
-  "photo": "photo/dress-figure.jpg",
-  "colors": 2,
-  "note": "The sticker was hand-cut through the art, so I closed the bottom with a black outline.",
-  "r1": "FIX: Just a bit cut off at bottom"
- },
- {
-  "id": "bald-guy",
-  "title": "bald guy",
-  "svg": "svg/bald-guy.svg",
-  "photo": "photo/bald-guy.jpg",
-  "colors": 1,
-  "note": "",
-  "r1": "FIX: Smooth, not so ribbed look"
- },
- {
-  "id": "stop-sign-guy",
-  "title": "Stop sign guy (とまれ)",
-  "svg": "svg/stop-sign-guy.svg",
-  "photo": "photo/stop-sign-guy.jpg",
-  "colors": 1,
-  "note": "Third try. If it still fails, it may need a sharper photo.",
-  "r1": "FIX: Retry"
- },
- {
-  "id": "light-of-my-life",
-  "title": "You're the light of my life",
-  "svg": "svg/light-of-my-life.svg",
-  "photo": "photo/light-of-my-life.jpg",
-  "colors": 3,
-  "note": "Less smoothing on the lettering to keep its detail.",
-  "r1": "FIX: Lost text detail"
- },
- {
-  "id": "fish",
-  "title": "fish",
-  "svg": "svg/fish.svg",
-  "photo": "photo/fish.jpg",
-  "colors": 1,
-  "note": "",
-  "r1": "FIX: Make smooth vector"
- },
- {
-  "id": "woodland-bird",
-  "title": "woodland bird",
-  "svg": "svg/woodland-bird.svg",
-  "photo": "photo/woodland-bird.jpg",
-  "colors": 11,
-  "note": "Circle is back and filled. The pink body and yellow sun now fill in too.",
-  "r1": "FIX: Bottom circle cut out"
+  "colors": "",
+  "note": "Black specks inside the purple cleaned up.",
+  "r1": "FIX: Some black leaking into the purple"
  },
  {
   "id": "crow-bw",
@@ -104,53 +41,8 @@
   "svg": "svg-bw/crow.svg",
   "photo": "photo/crow.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "hooded-head-bw",
-  "title": "hooded head (black & white)",
-  "svg": "svg-bw/hooded-head.svg",
-  "photo": "photo/hooded-head.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "moon-eyes-bw",
-  "title": "moon eyes (black & white)",
-  "svg": "svg-bw/moon-eyes.svg",
-  "photo": "photo/moon-eyes.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "round-face-bw",
-  "title": "round face (black & white)",
-  "svg": "svg-bw/round-face.svg",
-  "photo": "photo/round-face.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "ha-creature-bw",
-  "title": "\"ha\" creature (black & white)",
-  "svg": "svg-bw/ha-creature.svg",
-  "photo": "photo/ha-creature.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "my-feewins-bw",
-  "title": "My Feewins (black & white)",
-  "svg": "svg-bw/my-feewins.svg",
-  "photo": "photo/my-feewins.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Smoother outline, top of the head cleaned up.",
+  "r1": "FIX: Fix top line"
  },
  {
   "id": "dress-figure-bw",
@@ -158,35 +50,8 @@
   "svg": "svg-bw/dress-figure.svg",
   "photo": "photo/dress-figure.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "bald-guy-bw",
-  "title": "bald guy (black & white)",
-  "svg": "svg-bw/bald-guy.svg",
-  "photo": "photo/bald-guy.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "stop-sign-guy-bw",
-  "title": "Stop sign guy (とまれ) (black & white)",
-  "svg": "svg-bw/stop-sign-guy.svg",
-  "photo": "photo/stop-sign-guy.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "light-of-my-life-bw",
-  "title": "You're the light of my life (black & white)",
-  "svg": "svg-bw/light-of-my-life.svg",
-  "photo": "photo/light-of-my-life.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Bottom cut straight across.",
+  "r1": "FIX: Needs squared off bottom"
  },
  {
   "id": "f-off-cat-bw",
@@ -194,26 +59,8 @@
   "svg": "svg-bw/f-off-cat.svg",
   "photo": "photo/f-off-cat.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "cat-face-bw",
-  "title": "cat face (black & white)",
-  "svg": "svg-bw/cat-face.svg",
-  "photo": "photo/cat-face.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "red-thunderbird-bw",
-  "title": "red thunderbird (black & white)",
-  "svg": "svg-bw/red-thunderbird.svg",
-  "photo": "photo/red-thunderbird.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Straight line closes the bottom of the body.",
+  "r1": "FIX: Square off bottom of body"
  },
  {
   "id": "happy-friday-bw",
@@ -221,52 +68,43 @@
   "svg": "svg-bw/happy-friday.svg",
   "photo": "photo/happy-friday.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Right crow only.",
+  "r1": "FIX: Right crow only no happy friday"
  },
  {
-  "id": "fish-bw",
-  "title": "fish (black & white)",
-  "svg": "svg-bw/fish.svg",
-  "photo": "photo/fish.jpg",
+  "id": "light-of-my-life-bw",
+  "title": "You're the light of my life (black & white)",
+  "svg": "svg-bw/light-of-my-life.svg",
+  "photo": "photo/light-of-my-life.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Lettering re-traced on its own, less smoothing.",
+  "r1": "FIX: Fix text"
  },
  {
-  "id": "woodland-bird-bw",
-  "title": "woodland bird (black & white)",
-  "svg": "svg-bw/woodland-bird.svg",
-  "photo": "photo/woodland-bird.jpg",
+  "id": "red-thunderbird-bw",
+  "title": "red thunderbird (black & white)",
+  "svg": "svg-bw/red-thunderbird.svg",
+  "photo": "photo/red-thunderbird.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Sketchy double lines merged into solid strokes.",
+  "r1": "FIX: Make less sketchy, trace in solid vectors"
  },
  {
-  "id": "easter-bunny-bw",
-  "title": "easter bunny (black & white)",
-  "svg": "svg-bw/easter-bunny.svg",
-  "photo": "photo/easter-bunny.jpg",
+  "id": "ha-creature-bw",
+  "title": "\"ha\" creature (black & white)",
+  "svg": "svg-bw/ha-creature.svg",
+  "photo": "photo/ha-creature.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Rebuilt from the new smoother colour version.",
+  "r1": "PASS: Circle inside a"
  },
  {
-  "id": "damage-bw",
-  "title": "DAMAGE (black & white)",
-  "svg": "svg-bw/damage.svg",
-  "photo": "photo/damage.jpg",
+  "id": "my-feewins-bw",
+  "title": "My Feewins (black & white)",
+  "svg": "svg-bw/my-feewins.svg",
+  "photo": "photo/my-feewins.jpg",
   "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
- },
- {
-  "id": "pixel-goose-bw",
-  "title": "pixel goose (black & white)",
-  "svg": "svg-bw/pixel-goose.svg",
-  "photo": "photo/pixel-goose.jpg",
-  "colors": 1,
-  "note": "New: black-and-white version.",
-  "r1": ""
+  "note": "Rebuilt from the cleaned colour version.",
+  "r1": "FIX: Leaking black"
  }
 ]

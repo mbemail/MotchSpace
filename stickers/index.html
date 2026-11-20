@@ -131,7 +131,7 @@
 </dialog>
 
 <script>
-const ROUND = "r3";
+const ROUND = "r4";
 const CHIPS = ["Colors are off", "Lost detail", "Too smooth", "Too rough / specks", "Border too thick",
   "Border too thin", "Use my original cut shape", "Text is wrong", "Keep the texture", "Make it bigger"];
 
@@ -177,7 +177,7 @@ function card(item, behind) {
     </div>
     <div class="meta">
       <h2>${item.title}</h2>
-      <p>${item.colors} colors · <a href="${item.svg}" target="_blank" rel="noopener">open SVG</a></p>
+      <p>${item.colors ? item.colors + " colors · " : ""}<a href="${item.svg}" target="_blank" rel="noopener">open SVG</a></p>
       ${item.r1 ? `<p class="prev">Last round: ${escapeHtml(item.r1)}</p>` : ""}
       ${item.note ? `<p class="warn">⚠ ${item.note}</p>` : ""}
       ${prev ? `<p class="prev">Earlier: <b class="${prev.verdict}">${prev.verdict}</b>${prev.note ? " · " + escapeHtml(prev.note) : ""}</p>` : ""}

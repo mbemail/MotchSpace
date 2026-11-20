@@ -15,14 +15,14 @@ from vec import (lab, largest, drop_small, disk, flatfield, cluster, potrace_pat
 
 CFG = {
   "stop-sign-guy":   dict(kind="sticker", k=2, group=0.05, thresh=100, dots=300, speck=30, alpha=1.25, opt=0.5, nest=2.6, nest_thicken=1),
-  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=8, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=12),
+  "moon-eyes":       dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, flat_colors=2, only_yellow=True, smooth=4.5, alpha=1.33, opt=1.0, nest=14),
   "bald-guy":        dict(kind="sticker", k=2, speck=200, smooth=5.0, alpha=1.33, opt=0.8, nest=14),
   "hooded-head":     dict(kind="sticker", k=5, flat_colors=2, speck=200, smooth=4.5, alpha=1.33, opt=0.8, nest=14),
   "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14, nest=3, close_bottom=0.025),
   "crow":            dict(kind="sticker", k=5),
-  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=11),
-  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=0.8, nest=11, nest_thicken=2),
-  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.33, opt=0.8, nest=11, nest_thicken=5, thin_to_black=14, text_ink=150),
+  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=17, ring=0.045, islands=300),
+  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=16, text_ink=150, outline=10),
+  "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.33, opt=0.8, nest=11, nest_thicken=5, thin_to_black=14, text_ink=150, islands=600),
   "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=60, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, alpha=1.2, nest=2.2),
   "fish":            dict(kind="fish", nest=3.5, nest_thicken=1),
   "damage":          dict(kind="drawing", k=7, merge=6, region="nonwhite", sigma=3.0, speck=400, keep_colors=True),
@@ -35,6 +35,18 @@ CFG = {
                           erase=[(0.975, 0, 1, 1), (0, 0.5, 0.06, 1), (0.92, 0, 1, 0.12)]),
   "cat-face":        dict(kind="drawing", k=2, flat=True, ink=(18, 98, 64)),
 }
+
+# black-and-white-only variants of pieces whose colour version already passed
+CFG.update({
+  "crow-smooth":        dict(CFG["crow"], src="crow", paper_L=150, speck=200, smooth=4.0, nest=10, alpha=1.33, opt=1.0),
+  "dress-figure-sq":    dict(CFG["dress-figure"], src="dress-figure", close_bottom=0.03, square=35),
+  "f-off-cat-sq":       dict(CFG["f-off-cat"], src="f-off-cat", bottom_line=0.06,
+                             erase=CFG["f-off-cat"]["erase"] + [(0.93, 0, 1, 0.62)]),
+  "happy-friday-crow":  dict(CFG["happy-friday"], src="happy-friday", erase=CFG["happy-friday"]["erase"] + [(0, 0, 1, 0.2), (0, 0, 0.3, 1)],
+                             keep_at=(0.70, 0.45), keep_join=5),
+  "light-of-my-life-txt": dict(CFG["light-of-my-life"], src="light-of-my-life", text_bands=[(0.0, 0.2), (0.7, 1.0)], text_L=135, nest=1.6),
+  "red-thunderbird-solid": dict(CFG["red-thunderbird"], src="red-thunderbird", solid=7, nest=4, alpha=1.33, opt=1.0),
+})
 
 
 def chroma_L(rgb):
@@ -244,7 +256,7 @@ def compose(name, lbl2, roles, extra_layers=None, margin_frac=0.045, nest=0, nes
 
 def process(name):
     cfg = CFG[name]
-    img = cv2.imread(f"{W}/{name}_crop.png")
+    img = cv2.imread(f"{W}/{cfg.get('src', name)}_crop.png")
     s = 1400 / max(img.shape[:2])
     if s < 1:
         img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
@@ -334,6 +346,23 @@ def process(name):
                 roles[g] = ("ink", INK_BLACK)
     if cfg.get("flat_colors"):
         roles = flatten_colors(roles, lbl, cfg["flat_colors"])
+    if cfg.get("only_yellow"):
+        def _b(c):
+            return cv2.cvtColor(np.uint8([[list(c)[::-1]]]), cv2.COLOR_BGR2LAB)[0, 0].astype(float)[2]
+        for g, (r, c) in list(roles.items()):
+            if r == "color" and _b(c) < 150:
+                roles[g] = ("ink", INK_BLACK)
+    if cfg.get("text_bands"):
+        blk0 = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+        if blk0:
+            lt = lab(cv2.bilateralFilter(img, 7, 25, 5))[..., 0]
+            for (y0f, y1f) in cfg["text_bands"]:
+                band = np.zeros_like(region); band[int(y0f * H):int(y1f * H)] = True
+                txt = drop_small(band & region & (lt < cfg.get("text_L", 140)), 12)
+                pg0 = [g for g, (r, _) in roles.items() if r == "paper"]
+                if pg0:
+                    lbl[band & region & ~txt & np.isin(lbl, blk0)] = pg0[0]
+                lbl[txt] = blk0[0]
     if cfg.get("chroma_split"):
         # black ink is near-neutral; purple fill is not. Split them by colour strength.
         blk = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
@@ -373,6 +402,105 @@ def process(name):
                            int(cfg.get("speck", 60) * scale * scale))
 
     blk_ids = [g for g, (r, c) in roles.items() if r == "ink" and c == INK_BLACK]
+    ink_all = [g for g, (r, c) in roles.items() if r == "ink"]
+    pg_all = [g for g, (r, _) in roles.items() if r == "paper"]
+    def reassign_nearest(lbl_, mask_, exclude):
+        """Give pixels in mask_ the label of the nearest pixel not in `exclude` labels."""
+        keep = ~np.isin(lbl_, exclude) & ~mask_
+        _, (iy, ix) = ndi.distance_transform_edt(~keep, return_indices=True)
+        lbl_[mask_] = lbl_[iy, ix][mask_]
+    if cfg.get("islands") and blk_ids:
+        # small black specks floating inside colour areas
+        bm = np.isin(lbl2, blk_ids).astype(np.uint8)
+        k, cc, st, _ = cv2.connectedComponentsWithStats(bm, 8)
+        small = st[:, cv2.CC_STAT_AREA] < cfg["islands"] * scale * scale
+        small[0] = False
+        # main fills only: the small blue "rescue" colour also edges the pen lettering
+        tot = max(1, (lbl2 != -1).sum())
+        col_ids_ = [g for g, (r, _) in roles.items() if r == "color" and (lbl2 == g).sum() > 0.05 * tot]
+        rm = np.zeros(k, bool)
+        for i in np.where(small)[0]:
+            x, y, w, h = st[i, :4]
+            y0_, y1_, x0_, x1_ = max(0, y - 6), y + h + 6, max(0, x - 6), x + w + 6
+            comp = cc[y0_:y1_, x0_:x1_] == i
+            ring_ = cv2.dilate(comp.astype(np.uint8), disk(4)).astype(bool) & ~comp
+            sub = lbl2[y0_:y1_, x0_:x1_][ring_]
+            # only specks sitting inside a colour area; lettering on paper stays
+            rm[i] = sub.size > 0 and np.isin(sub, col_ids_).mean() > 0.7
+        reassign_nearest(lbl2, rm[cc], blk_ids)
+    if cfg.get("restroke") and blk_ids:
+        # rebuild the main outline as an even-width line along its centre
+        from skimage.morphology import skeletonize
+        bm = np.isin(lbl2, blk_ids)
+        dt = cv2.distanceTransform(bm.astype(np.uint8), cv2.DIST_L2, 5)
+        k, cc = cv2.connectedComponents(bm.astype(np.uint8), connectivity=8)
+        mx = np.asarray(ndi.maximum(dt, cc, np.arange(k))); mx[0] = 0
+        main = (mx >= cfg["restroke"])[cc] & bm            # thick parts only, text stays as is
+        pre = cv2.GaussianBlur(main.astype(np.float32), (0, 0), cfg["restroke"]) > 0.5
+        sk = skeletonize(pre)
+        r = float(np.median(dt[sk & main])) if (sk & main).any() else cfg["restroke"]
+        new = cv2.dilate(sk.astype(np.uint8), disk(r)).astype(bool)
+        new = cv2.GaussianBlur(new.astype(np.float32), (0, 0), r / 2) > 0.5
+        reassign_nearest(lbl2, main & ~new, blk_ids)
+        lbl2[new] = blk_ids[0]
+    if cfg.get("outline") and blk_ids:
+        # outer outline as one even-width smooth band; inner details untouched
+        art = (lbl2 != -1) & ~np.isin(lbl2, pg_all)
+        main = largest(art)
+        sil = cv2.GaussianBlur(main.astype(np.float32), (0, 0), cfg["outline"]) > 0.5
+        din = cv2.distanceTransform(sil.astype(np.uint8), cv2.DIST_L2, 5)
+        bm = np.isin(lbl2, blk_ids)
+        S_ = max(sil.shape)
+        t = 2 * float(np.median(din[bm & sil & (din < 0.06 * S_)]))
+        band = sil & (din <= t)
+        extra_blk = bm & main & ~band & (din < 1.25 * t)
+        lbl2[main & ~sil] = -1
+        reassign_nearest(lbl2, extra_blk, blk_ids + [-1])
+        lbl2[band] = blk_ids[0]
+    if cfg.get("ring") and blk_ids:
+        # outer outline as one clean ellipse ring
+        art = lbl2 != -1
+        cs, _ = cv2.findContours(art.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+        c = max(cs, key=cv2.contourArea)
+        (cx, cy), (aw, ah), ang = cv2.fitEllipse(c)
+        bm = np.isin(lbl2, blk_ids)
+        dt = cv2.distanceTransform(bm.astype(np.uint8), cv2.DIST_L2, 5)
+        outer = np.zeros(art.shape, np.uint8)
+        cv2.ellipse(outer, ((cx, cy), (aw * 0.985, ah * 0.985), ang), 1, -1)
+        edge = outer.astype(bool) & ~cv2.erode(outer, disk(8)).astype(bool)
+        t = cfg["ring"] * max(aw, ah)
+        inner = np.zeros_like(outer)
+        cv2.ellipse(inner, ((cx, cy), (aw * 0.985 - 2 * t, ah * 0.985 - 2 * t), ang), 1, -1)
+        ring = outer.astype(bool) & ~inner.astype(bool)
+        lbl2[~outer.astype(bool)] = -1
+        # black that hugged the old ring's inner edge goes back to the fill
+        hug = bm & inner.astype(bool) & ~cv2.erode(inner, disk(int(t * 0.6))).astype(bool)
+        hug &= ~ndi.binary_dilation(~bm | ~inner.astype(bool), iterations=0) if False else hug
+        reassign_nearest(lbl2, hug & ~ring, blk_ids + [-1])
+        lbl2[ring] = blk_ids[0]
+    if cfg.get("solid") and ink_all:
+        # merge sketchy parallel strokes into bold solid lines
+        im_ = np.isin(lbl2, ink_all)
+        r = cfg["solid"] * scale
+        sol = cv2.morphologyEx(im_.astype(np.uint8), cv2.MORPH_CLOSE, disk(r))
+        sol = cv2.GaussianBlur(sol.astype(np.float32), (0, 0), r / 2) > 0.5
+        sol = drop_small(sol, int(400 * scale * scale))
+        lbl2[im_ & ~sol] = pg_all[0] if pg_all else -1
+        lbl2[sol] = ink_all[0]
+    if cfg.get("keep_at"):
+        # keep only the figure under one point (e.g. the right-hand crow)
+        im_ = np.isin(lbl2, ink_all)
+        grp = cv2.dilate(im_.astype(np.uint8), disk(cfg.get("keep_join", 4) * scale))
+        k, cc = cv2.connectedComponents(grp, connectivity=8)
+        fx, fy = cfg["keep_at"]
+        hy, hx = lbl2.shape
+        pick = cc[int(fy * hy), int(fx * hx)]
+        if pick == 0:
+            ys, xs = np.where(cc > 0)
+            d = (ys - fy * hy) ** 2 + (xs - fx * hx) ** 2
+            pick = cc[ys[d.argmin()], xs[d.argmin()]]
+        drop = im_ & (cc != pick)
+        lbl2[drop] = pg_all[0] if pg_all else -1
     if cfg.get("thin_to_black") and blk_ids:
         # thin strokes that ended up in the main fill colour (e.g. navy pen lettering) go to black
         col_ids = [g for g, (r, _) in roles.items() if r == "color"]
@@ -395,9 +523,26 @@ def process(name):
         yy = np.arange(art.shape[0])[:, None]
         # only where the bottom edge is low (the cut), not the raised arm etc.
         low = bottom >= np.percentile(bottom[cols_], 40)
-        band = art & (yy > (bottom - t)[None, :]) & low[None, :]
+        if cfg.get("square"):
+            ybase = int(np.percentile(bottom[cols_][low[cols_]], cfg["square"]))
+            lbl2[yy[:, 0] > ybase, :] = -1
+            art = lbl2 != -1
+            band = art & (yy > ybase - t)
+        else:
+            band = art & (yy > (bottom - t)[None, :]) & low[None, :]
         band = cv2.morphologyEx(band.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)).astype(bool) & art
         lbl2[band] = blk_ids[0]
+
+    if cfg.get("bottom_line") and ink_all:
+        # close an open drawing with a straight line along its bottom
+        im_ = np.isin(lbl2, ink_all)
+        ys, xs = np.where(im_)
+        ymax = ys.max()
+        low_ = ys > ymax - cfg["bottom_line"] * lbl2.shape[0]
+        x0_, x1_ = xs[low_].min(), xs[low_].max()
+        dt = cv2.distanceTransform(im_.astype(np.uint8), cv2.DIST_L2, 5)
+        w_ = max(4, int(2 * np.percentile(dt[im_], 90)))
+        lbl2[ymax - w_ + 1:ymax + 1, x0_:x1_ + 1] = ink_all[0]
 
     extra = None
     if cfg.get("fill"):
