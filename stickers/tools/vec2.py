@@ -20,8 +20,8 @@ CFG = {
   "hooded-head":     dict(kind="sticker", k=5, flat_colors=2, speck=200, smooth=4.5, alpha=1.33, opt=0.8, nest=14),
   "dress-figure":    dict(kind="sticker", k=5, merge=8, speck=60, sigma=1.6, flat_colors=1, inside=False, chroma_split=14, nest=3, close_bottom=0.025),
   "crow":            dict(kind="sticker", k=5),
-  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=17, ring=0.045, islands=300),
-  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=16, text_ink=150, outline=10),
+  "round-face":      dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=17, ring=0.045, islands=300, ring_islands=2500),
+  "ha-creature":     dict(kind="sticker", k=5, merge=8, speck=400, sigma=2.4, inside=False, chroma_split=9, flat_colors=2, smooth=4.5, alpha=1.33, opt=1.0, nest=16, text_ink=150, fill_outline=14),
   "my-feewins":      dict(kind="sticker", k=7, merge=10, region="grabcut", speck=40, inside=False, rescue=22, flat_colors=3, smooth=4.0, thicken=4, alpha=1.33, opt=0.8, nest=11, nest_thicken=5, thin_to_black=14, text_ink=150, islands=600),
   "light-of-my-life":dict(kind="sticker", k=7, merge=9, grabcut=True, speck=60, inside=False, dark_to_black=120, paper_L=160, flat_colors=2, alpha=1.2, nest=2.2),
   "fish":            dict(kind="fish", nest=3.5, nest_thicken=1),
@@ -38,11 +38,11 @@ CFG = {
 
 # black-and-white-only variants of pieces whose colour version already passed
 CFG.update({
-  "crow-smooth":        dict(CFG["crow"], src="crow", paper_L=150, speck=200, smooth=4.0, nest=10, alpha=1.33, opt=1.0),
-  "dress-figure-sq":    dict(CFG["dress-figure"], src="dress-figure", close_bottom=0.03, square=35),
+  "crow-smooth":        dict(CFG["crow"], src="crow", paper_L=150, speck=200, smooth=4.0, nest=14, alpha=1.33, opt=1.0),
+  "dress-figure-sq":    dict(CFG["dress-figure"], src="dress-figure", close_bottom=0.03, square=35, black_below=0.55),
   "f-off-cat-sq":       dict(CFG["f-off-cat"], src="f-off-cat", bottom_line=0.06,
                              erase=CFG["f-off-cat"]["erase"] + [(0.93, 0, 1, 0.62)]),
-  "happy-friday-crow":  dict(CFG["happy-friday"], src="happy-friday", erase=CFG["happy-friday"]["erase"] + [(0, 0, 1, 0.2), (0, 0, 0.3, 1)],
+  "happy-friday-crow":  dict(CFG["happy-friday"], src="happy-friday", erase=[(0, 0.97, 1, 1), (0.90, 0, 1, 1), (0, 0, 1, 0.2), (0, 0, 0.3, 1)],
                              keep_at=(0.70, 0.45), keep_join=5),
   "light-of-my-life-txt": dict(CFG["light-of-my-life"], src="light-of-my-life", text_bands=[(0.0, 0.2), (0.7, 1.0)], text_L=135, nest=1.6),
   "red-thunderbird-solid": dict(CFG["red-thunderbird"], src="red-thunderbird", solid=7, nest=4, alpha=1.33, opt=1.0),
@@ -457,6 +457,24 @@ def process(name):
         lbl2[main & ~sil] = -1
         reassign_nearest(lbl2, extra_blk, blk_ids + [-1])
         lbl2[band] = blk_ids[0]
+    if cfg.get("fill_outline") and blk_ids:
+        col_ids_ = [g for g, (r, _) in roles.items() if r == "color"]
+        art = (lbl2 != -1) & ~np.isin(lbl2, pg_all)
+        main = largest(art)
+        inner = np.isin(lbl2, col_ids_) & main
+        R_ = cfg["fill_outline"]
+        inner = cv2.morphologyEx(inner.astype(np.uint8), cv2.MORPH_CLOSE, disk(R_))
+        inner = ndi.binary_fill_holes(inner)
+        inner = cv2.GaussianBlur(inner.astype(np.float32), (0, 0), R_) > 0.5
+        bm = np.isin(lbl2, blk_ids)
+        dout = cv2.distanceTransform((~inner).astype(np.uint8), cv2.DIST_L2, 5)
+        t = float(np.median(dout[bm & main & ~inner & (dout < 0.05 * max(lbl2.shape))])) * 2
+        outer = cv2.GaussianBlur((dout <= t).astype(np.float32), (0, 0), R_ / 2) > 0.5
+        lbl2[main & ~outer] = -1
+        lbl2[outer & ~inner] = blk_ids[0]
+        # gaps inside the interior take the fill colour; black inside stays (eye ring etc.)
+        hole = inner & (lbl2 == -1)
+        reassign_nearest(lbl2, hole, [-1])
     if cfg.get("ring") and blk_ids:
         # outer outline as one clean ellipse ring
         art = lbl2 != -1
@@ -478,6 +496,18 @@ def process(name):
         hug &= ~ndi.binary_dilation(~bm | ~inner.astype(bool), iterations=0) if False else hug
         reassign_nearest(lbl2, hug & ~ring, blk_ids + [-1])
         lbl2[ring] = blk_ids[0]
+        if cfg.get("ring_islands"):
+            insd = inner.astype(bool) & ~ring
+            bm2 = (np.isin(lbl2, blk_ids) & insd).astype(np.uint8)
+            k2, cc2, st2, _ = cv2.connectedComponentsWithStats(bm2, 8)
+            sm2 = st2[:, cv2.CC_STAT_AREA] < cfg["ring_islands"] * scale * scale
+            sm2[0] = False
+            reassign_nearest(lbl2, sm2[cc2], blk_ids + [-1])
+            # black hugging the ring's inner side: open it away
+            near = insd & ~cv2.erode(inner, disk(int(t * 1.2))).astype(bool)
+            bm3 = np.isin(lbl2, blk_ids) & near
+            opened = cv2.morphologyEx(np.isin(lbl2, blk_ids).astype(np.uint8), cv2.MORPH_OPEN, disk(int(t * 0.6))).astype(bool)
+            reassign_nearest(lbl2, bm3 & ~opened, blk_ids + [-1])
     if cfg.get("solid") and ink_all:
         # merge sketchy parallel strokes into bold solid lines
         im_ = np.isin(lbl2, ink_all)
@@ -533,6 +563,10 @@ def process(name):
         band = cv2.morphologyEx(band.astype(np.uint8), cv2.MORPH_CLOSE, disk(6)).astype(bool) & art
         lbl2[band] = blk_ids[0]
 
+    if cfg.get("black_below") and blk_ids:
+        col_ids_ = [g for g, (r, _) in roles.items() if r == "color"]
+        yy_ = np.arange(lbl2.shape[0])[:, None]
+        lbl2[np.isin(lbl2, col_ids_) & (yy_ > cfg["black_below"] * lbl2.shape[0])] = blk_ids[0]
     if cfg.get("bottom_line") and ink_all:
         # close an open drawing with a straight line along its bottom
         im_ = np.isin(lbl2, ink_all)

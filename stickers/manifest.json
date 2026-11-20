@@ -5,8 +5,8 @@
   "svg": "svg/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": "",
-  "note": "Outer outline redrawn as one even, smooth line.",
-  "r1": "FIX: Make just smooth lines, trace over with single line vectors"
+  "note": "Outline rebuilt as one even band around the purple. Nothing outside it.",
+  "r1": "FIX: Leaking everywhere"
  },
  {
   "id": "round-face",
@@ -14,80 +14,8 @@
   "svg": "svg/round-face.svg",
   "photo": "photo/round-face.jpg",
   "colors": "",
-  "note": "Outer ring is now one clean circle. Specks inside the purple removed.",
-  "r1": "FIX: Make just a smooth line"
- },
- {
-  "id": "moon-eyes",
-  "title": "moon eyes",
-  "svg": "svg/moon-eyes.svg",
-  "photo": "photo/moon-eyes.jpg",
-  "colors": "",
-  "note": "Purple removed. Yellow eyes on black only.",
-  "r1": "FIX: Eyes yellow only"
- },
- {
-  "id": "my-feewins",
-  "title": "My Feewins",
-  "svg": "svg/my-feewins.svg",
-  "photo": "photo/my-feewins.jpg",
-  "colors": "",
-  "note": "Black specks inside the purple cleaned up.",
-  "r1": "FIX: Some black leaking into the purple"
- },
- {
-  "id": "crow-bw",
-  "title": "crow (black & white)",
-  "svg": "svg-bw/crow.svg",
-  "photo": "photo/crow.jpg",
-  "colors": 1,
-  "note": "Smoother outline, top of the head cleaned up.",
-  "r1": "FIX: Fix top line"
- },
- {
-  "id": "dress-figure-bw",
-  "title": "dress figure (black & white)",
-  "svg": "svg-bw/dress-figure.svg",
-  "photo": "photo/dress-figure.jpg",
-  "colors": 1,
-  "note": "Bottom cut straight across.",
-  "r1": "FIX: Needs squared off bottom"
- },
- {
-  "id": "f-off-cat-bw",
-  "title": "F*** off cat (black & white)",
-  "svg": "svg-bw/f-off-cat.svg",
-  "photo": "photo/f-off-cat.jpg",
-  "colors": 1,
-  "note": "Straight line closes the bottom of the body.",
-  "r1": "FIX: Square off bottom of body"
- },
- {
-  "id": "happy-friday-bw",
-  "title": "happy friday (black & white)",
-  "svg": "svg-bw/happy-friday.svg",
-  "photo": "photo/happy-friday.jpg",
-  "colors": 1,
-  "note": "Right crow only.",
-  "r1": "FIX: Right crow only no happy friday"
- },
- {
-  "id": "light-of-my-life-bw",
-  "title": "You're the light of my life (black & white)",
-  "svg": "svg-bw/light-of-my-life.svg",
-  "photo": "photo/light-of-my-life.jpg",
-  "colors": 1,
-  "note": "Lettering re-traced on its own, less smoothing.",
-  "r1": "FIX: Fix text"
- },
- {
-  "id": "red-thunderbird-bw",
-  "title": "red thunderbird (black & white)",
-  "svg": "svg-bw/red-thunderbird.svg",
-  "photo": "photo/red-thunderbird.jpg",
-  "colors": 1,
-  "note": "Sketchy double lines merged into solid strokes.",
-  "r1": "FIX: Make less sketchy, trace in solid vectors"
+  "note": "Specks and the black hugging the inside of the ring are gone.",
+  "r1": "FIX: Remove stray black in purple"
  },
  {
   "id": "ha-creature-bw",
@@ -95,16 +23,34 @@
   "svg": "svg-bw/ha-creature.svg",
   "photo": "photo/ha-creature.jpg",
   "colors": 1,
-  "note": "Rebuilt from the new smoother colour version.",
-  "r1": "PASS: Circle inside a"
+  "note": "Rebuilt from the new clean colour version.",
+  "r1": "FIX: Trim loose black bits"
  },
  {
-  "id": "my-feewins-bw",
-  "title": "My Feewins (black & white)",
-  "svg": "svg-bw/my-feewins.svg",
-  "photo": "photo/my-feewins.jpg",
+  "id": "dress-figure-bw",
+  "title": "dress figure (black & white)",
+  "svg": "svg-bw/dress-figure.svg",
+  "photo": "photo/dress-figure.jpg",
   "colors": 1,
-  "note": "Rebuilt from the cleaned colour version.",
-  "r1": "FIX: Leaking black"
+  "note": "Bottom filled solid black.",
+  "r1": "FIX: Fill in bottom"
+ },
+ {
+  "id": "happy-friday-bw",
+  "title": "happy friday (black & white)",
+  "svg": "svg-bw/happy-friday.svg",
+  "photo": "photo/happy-friday.jpg",
+  "colors": 1,
+  "note": "Feet and toes no longer clipped.",
+  "r1": "FIX: Cut off feet"
+ },
+ {
+  "id": "crow-bw",
+  "title": "crow (black & white)",
+  "svg": "svg-bw/crow.svg",
+  "photo": "photo/crow.jpg",
+  "colors": 1,
+  "note": "Head line made solid.",
+  "r1": "PASS: Right side of head, make solid line"
  }
 ]
