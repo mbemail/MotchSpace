@@ -1,20 +1,28 @@
 [
- {
-  "id": "ha-creature",
-  "title": "\"ha\" creature",
-  "svg": "svg/ha-creature.svg",
-  "photo": "photo/ha-creature.jpg",
-  "colors": "",
-  "note": "Pupil traced on its own and laid back over the eye, so the smoothing can't erase it.",
-  "r1": "FAIL: Lost pupil"
- },
- {
-  "id": "ha-creature-bw",
-  "title": "\"ha\" creature (black & white)",
-  "svg": "svg-bw/ha-creature.svg",
-  "photo": "photo/ha-creature.jpg",
-  "colors": 1,
-  "note": "Rebuilt from the colour version with the pupil back.",
-  "r1": "FAIL: Lost pupil"
- }
+  {
+    "id": "ha-creature",
+    "title": "\"ha\" creature",
+    "svg": "svg/ha-creature.svg",
+    "photo": "photo/ha-creature.jpg",
+    "colors": "",
+    "note": "Pupil traced on its own and laid back over the eye, so the smoothing can't erase it.",
+    "r1": "FAIL: Lost pupil"
+  },
+  {
+    "id": "ha-creature-bw",
+    "title": "\"ha\" creature (black & white)",
+    "svg": "svg-bw/ha-creature.svg",
+    "photo": "photo/ha-creature.jpg",
+    "colors": 1,
+    "note": "Rebuilt from the colour version with the pupil back.",
+    "r1": "FAIL: Lost pupil"
+  },
+  {
+    "id": "maiinganz-wolf",
+    "title": "Ma'iinganz Makes wolf logo",
+    "svg": "svg/maiinganz-wolf.svg",
+    "photo": "",
+    "colors": 1,
+    "note": "The stamped wolf from the business card and motch.space, with a die-cut border added."
+  }
 ]
